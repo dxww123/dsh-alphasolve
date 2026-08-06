@@ -1,0 +1,38 @@
+node_modules/
+coverage/
+*.tsbuildinfo
+*.tgz
+
+# Local planning material is kept outside the distributable repository
+requirements*.md
+notes/
+drafts/
+
+# Credentials and local DSH state
+.env
+.env.*
+!.env.example
+.npmrc
+.dsh/
+.alphasolve/
+
+# Mathematical workspace inputs and generated research
+problem.md
+hint.md
+solution.md
+knowledge/
+unverified_propositions/
+verified_propositions/
+
+# Logs, traces, editor state, and OS metadata
+*.log
+*.jsonl
+*.jsonl.*
+*.zstd
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

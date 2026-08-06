@@ -1,0 +1,6 @@
+# Install one dormant AlphaSolve controller into the selected DSH profile.
+# The controller contributes no model-facing prompt or tool until a direct
+# human request explicitly asks to solve problem.md with AlphaSolve.
+- insert:
+    - id: dsh-alphasolve
+      name: '@dsh-external/dsh-alphasolve'

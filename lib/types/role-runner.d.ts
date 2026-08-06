@@ -1,0 +1,78 @@
+import type { Context } from 'cordis';
+import { type Agent, type AgentLlmTarget } from '@deepseek-ai/dsh-agent';
+import { type ContentBlock } from '@deepseek-ai/dsh-llm';
+import { SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session';
+import { type RoleKind, type RolePermissionPolicy } from './permissions.js';
+export type RoleRunStopReason = 'completed' | 'max_turns' | 'max_tokens' | 'aborted' | 'blocked' | 'error' | 'disposed' | 'interrupted';
+export interface RoleRunResult {
+    readonly agentId: ReturnType<typeof SessionId>;
+    readonly role: RoleKind;
+    /** Last complete assistant message; empty when the role never produced one. */
+    readonly output: readonly ContentBlock[];
+    /** Text blocks from output joined for AlphaSolve's verdict parsers. */
+    readonly text: string;
+    readonly stopReason: RoleRunStopReason;
+    readonly steps: number;
+    readonly turnEndReason?: TurnEndReason;
+}
+/** Report observable work in a nested helper to its owning role watchdog. */
+export type RoleActivityReporter = () => void;
+export type RoleRunFailurePhase = 'create' | 'run' | 'inactivity' | 'dispose';
+/** Best-effort snapshot emitted before a runner rejects. The original error is rethrown unchanged. */
+export interface RoleRunFailure {
+    readonly agentId: string;
+    readonly role: RoleKind;
+    readonly phase: RoleRunFailurePhase;
+    readonly output: readonly ContentBlock[];
+    readonly text: string;
+    readonly steps: number;
+    readonly error: unknown;
+    readonly cleanupError?: unknown;
+    readonly turnEndReason?: TurnEndReason;
+}
+/** Register role-local helper tools or result-capture listeners before publication. */
+export type RoleHelperSetup = (childCtx: Context, child: Agent, reportActivity: RoleActivityReporter) => void | Promise<void>;
+export interface RunRoleAgentOptions {
+    readonly parent: Agent;
+    readonly role: RoleKind;
+    /** Absolute workspace/cwd for the fresh child session. */
+    readonly cwd: string;
+    readonly persona: string;
+    readonly prompt: string | readonly ContentBlock[];
+    /** AlphaSolve turns map to DSH model-request steps. */
+    readonly maxTurns: number;
+    readonly signal: AbortSignal;
+    readonly permissionPolicy: RolePermissionPolicy;
+    /** Complete resolved route; omit only when reasoning-effort inheritance is irrelevant. */
+    readonly modelTarget?: AgentLlmTarget;
+    readonly maxTokens?: number;
+    /** Global tools retained by tools.restrict; scoped helpers are registered separately. */
+    readonly allowedGlobalTools?: readonly string[];
+    readonly setupHelpers?: RoleHelperSetup;
+    /** Propagate nested-role activity to an owning role's inactivity watchdog. */
+    readonly onActivity?: RoleActivityReporter;
+    /** Internal diagnostic handoff used to persist partial traces on rejection. */
+    readonly onFailure?: (failure: RoleRunFailure) => void;
+    /** Technical bounds only; they do not impose a total worker wall-clock limit. */
+    readonly createTimeoutMs?: number;
+    readonly inactivityTimeoutMs?: number;
+    /** @deprecated Use inactivityTimeoutMs. Retained for local API compatibility. */
+    readonly idleTimeoutMs?: number;
+    readonly disposeTimeoutMs?: number;
+}
+export declare const ROLE_CREATE_TIMEOUT_MS = 60000;
+/** Abort only after one hour without any observable role or nested-helper activity. */
+export declare const ROLE_INACTIVITY_TIMEOUT_MS: number;
+/** @deprecated Use ROLE_INACTIVITY_TIMEOUT_MS. */
+export declare const ROLE_IDLE_TIMEOUT_MS: number;
+export declare const ROLE_DISPOSE_TIMEOUT_MS = 15000;
+export declare class RoleTechnicalTimeoutError extends Error {
+    readonly phase: 'create' | 'inactivity' | 'dispose';
+    constructor(phase: 'create' | 'inactivity' | 'dispose', milliseconds: number);
+}
+/**
+ * Run one fresh, single-turn DSH Agent with role-scoped prompt, route, tools,
+ * path policy, cancellation, and an AlphaSolve max-step boundary.
+ */
+export declare function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult>;
+//# sourceMappingURL=role-runner.d.ts.map
