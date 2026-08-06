@@ -2,9 +2,10 @@
 
 [English](README.md)
 
-AlphaSolve for DSH 把 AlphaSolve 的数学求解流程接入 DeepSeek Harness。插件安装后默认
-休眠；只有用户明确提到 `AlphaSolve` 并要求用它求解当前工作区的 `problem.md` 时，
-才会为该 session 加载求解工具。
+AlphaSolve for DSH 把
+[AlphaSolve](https://github.com/tanzcoding/alphasolve) 的数学求解流程接入
+DeepSeek Harness。插件安装后默认休眠；只有用户明确提到 `AlphaSolve` 并要求用它
+求解当前工作区的 `problem.md` 时，才会为该 session 加载求解工具。
 
 ## 兼容的 DSH 版本
 

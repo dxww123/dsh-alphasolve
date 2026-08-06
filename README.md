@@ -2,9 +2,10 @@
 
 [中文](README.zh-CN.md)
 
-AlphaSolve for DSH integrates the AlphaSolve mathematical workflow with
-DeepSeek Harness. The installed controller is dormant by default. It loads the
-solver tools for one session only when the user explicitly mentions
+AlphaSolve for DSH integrates the
+[AlphaSolve](https://github.com/tanzcoding/alphasolve) mathematical workflow
+with DeepSeek Harness. The installed controller is dormant by default. It loads
+the solver tools for one session only when the user explicitly mentions
 `AlphaSolve` and asks it to solve the selected workspace's `problem.md`.
 
 ## Compatible DSH version
