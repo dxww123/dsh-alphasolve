@@ -120,6 +120,8 @@ export interface ActivateResult {
     readonly workspace: string;
     readonly capacity?: number;
     readonly resumed?: boolean;
+    readonly agentPreset?: string;
+    readonly missingTools?: readonly string[];
 }
 /** Immediate result of starting one worker. */
 export interface WorkerStartResult {

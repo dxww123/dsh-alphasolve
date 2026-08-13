@@ -57,19 +57,19 @@ describe('runtime generation archive', () => {
     })
     const statePath = path.join(root, '.alphasolve', 'state.json')
     await store.recordCompletion({
-      workerId: 'legacy',
+      workerId: 'previous',
       status: 'verified',
       startedAt: now,
       completedAt: now,
       problemDigest: 'old-problem-digest',
       producedVerifiedProposition: true,
       solved: false,
-      summary: 'legacy verified proposition',
+      summary: 'previous verified proposition',
       artifactPaths: [],
     })
-    const legacyWorker: WorkerRecord = {
+    const previousWorker: WorkerRecord = {
       version: STATE_VERSION,
-      id: 'legacy',
+      id: 'previous',
       phase: 'complete',
       terminalStatus: 'verified',
       createdAt: now,
@@ -78,10 +78,10 @@ describe('runtime generation archive', () => {
       problemDigest: 'old-problem-digest',
       round: 1,
       theoremChecks: 1,
-      summary: 'legacy verified proposition',
+      summary: 'previous verified proposition',
       artifactPaths: [],
     }
-    await store.writeWorker(legacyWorker)
+    await store.writeWorker(previousWorker)
     await writeFile(path.join(root, '.alphasolve', 'curator', 'queue.json'), '{"version":1,"tasks":[]}\n')
 
     let partialBackup = ''
@@ -100,10 +100,10 @@ describe('runtime generation archive', () => {
     expect(await existing(statePath)).toBe(true)
     expect(await readdir(path.join(root, '.alphasolve', 'completions'))).toEqual([])
     expect(await readdir(path.join(root, '.alphasolve', 'workers'))).toEqual([])
-    expect(JSON.parse(await readFile(path.join(partialBackup, 'completions', 'legacy.json'), 'utf8')))
-      .toMatchObject({ workerId: 'legacy', status: 'verified' })
-    expect(JSON.parse(await readFile(path.join(partialBackup, 'workers', 'legacy.json'), 'utf8')))
-      .toMatchObject({ id: 'legacy', terminalStatus: 'verified' })
+    expect(JSON.parse(await readFile(path.join(partialBackup, 'completions', 'previous.json'), 'utf8')))
+      .toMatchObject({ workerId: 'previous', status: 'verified' })
+    expect(JSON.parse(await readFile(path.join(partialBackup, 'workers', 'previous.json'), 'utf8')))
+      .toMatchObject({ id: 'previous', terminalStatus: 'verified' })
     expect(await existing(path.join(partialBackup, 'state.json'))).toBe(false)
     expect(await existing(path.join(partialBackup, 'generation.json'))).toBe(true)
 
@@ -125,8 +125,8 @@ describe('runtime generation archive', () => {
     expect(await existing(path.join(committedBackup, 'state.json'))).toBe(true)
     expect(await readdir(path.join(root, '.alphasolve', 'completions'))).toEqual([])
     expect(await readdir(path.join(root, '.alphasolve', 'workers'))).toEqual([])
-    expect(JSON.parse(await readFile(path.join(partialBackup, 'completions', 'legacy.json'), 'utf8')))
-      .toMatchObject({ workerId: 'legacy' })
+    expect(JSON.parse(await readFile(path.join(partialBackup, 'completions', 'previous.json'), 'utf8')))
+      .toMatchObject({ workerId: 'previous' })
   })
 
   it.each([

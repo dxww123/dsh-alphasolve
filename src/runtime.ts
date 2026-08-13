@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { assembleContextFor, type Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
@@ -12,7 +13,7 @@ import type {
   ToolDefinition,
   ToolRunContext,
 } from '@deepseek-ai/dsh-tools'
-import type { Context, Fiber } from 'cordis'
+import type { Context, Fiber } from '@deepseek-ai/cordis'
 
 import { atomicWriteJson, readJsonObject } from './atomic.js'
 import { loadAlphaSolveConfig } from './config.js'
@@ -49,6 +50,7 @@ import { WorkerManager } from './worker-manager.js'
 import { createFixedWorkerExecutor } from './workflow.js'
 import {
   backupSolution,
+  canonicalWorkspace,
   initializeWorkspace,
   readWorkspaceInput,
   resolveWorkspacePath,
@@ -63,8 +65,27 @@ export const RUNTIME_TOOL_NAMES = Object.freeze({
   stop: 'alphasolve_stop',
 } as const)
 
-const STANDARD_FILE_TOOLS = ['read', 'write', 'edit', 'glob', 'grep'] as const
+export const ALPHASOLVE_REQUIRED_FILE_TOOLS = ['read', 'write', 'edit', 'glob', 'grep'] as const
 const WEB_TOOLS = ['web', 'web_search', 'web_fetch'] as const
+
+export const AGENT_PRESET_MISSING_TOOLS_REASON = 'agent_preset_missing_required_tools' as const
+export const AGENT_PRESET_BLOCKS_PROMPT_REASON = 'agent_preset_blocks_alphasolve_prompt' as const
+
+export interface AlphaSolveAgentCapabilities {
+  readonly agentPreset?: string
+  readonly missingTools: readonly string[]
+}
+
+/** Inspect the complete inherited catalog for this exact live Agent scope. */
+export function inspectAlphaSolveAgentCapabilities(agent: Agent): AlphaSolveAgentCapabilities {
+  const agentPreset = agent.ctx.get('agentPresets')?.composedPreset(agent.ctx)
+  const missingTools = ALPHASOLVE_REQUIRED_FILE_TOOLS
+    .filter(name => agent.ctx.tools.get(name, agent) === undefined)
+  return Object.freeze({
+    ...(agentPreset === undefined ? {} : { agentPreset }),
+    missingTools: Object.freeze(missingTools),
+  })
+}
 
 /** Curator-helper output is already part of its parent task and must not self-enqueue. */
 export function shouldEnqueueCuratorTrace(
@@ -90,6 +111,24 @@ export type RuntimeActivationResult =
       readonly runtime: AlphaSolveRuntime
     })
 
+/** Cold-resume outcome. An absent reason means this session has no live AlphaSolve intent. */
+export type RuntimeRestoreResult =
+  | {
+      readonly restored: false
+      readonly workspace: string
+      readonly reason?: string
+      readonly agentPreset?: string
+      readonly missingTools?: readonly string[]
+    }
+  | {
+      readonly restored: true
+      readonly workspace: string
+      readonly capacity: number
+      readonly runtime: AlphaSolveRuntime
+    }
+
+type ActivationMode = 'explicit' | 'session-resume'
+
 type ShutdownKind = 'cancelled' | 'interrupted' | 'solved'
 
 function errorMessage(error: unknown): string {
@@ -98,6 +137,7 @@ function errorMessage(error: unknown): string {
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+    || ((error as Error | undefined)?.cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
 }
 
 function argumentRecord(args: unknown, tool: string): Record<string, unknown> {
@@ -174,6 +214,128 @@ function narrowedIndexTool(definition: ToolDefinition): ToolDefinition {
 
 function successfulToolResult(event: SessionEvent<'tool/result'>): boolean {
   return event.data.message.content[0].isError === false
+}
+
+function toolResultJson(event: SessionEvent<'tool/result'>): Record<string, unknown> | undefined {
+  if (!successfulToolResult(event)) return undefined
+  const result = event.data.message.content[0]
+  const text = result.content
+    .filter((block): block is Extract<(typeof result.content)[number], { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+  if (text === '') return undefined
+  try {
+    const value = JSON.parse(text) as unknown
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A successful activation is durable user authorization for this session.
+ * Any later stop call wins even if the process died before its result was
+ * appended: fail closed rather than resurrecting an intentionally stopped run.
+ */
+export function hasDurableAlphaSolveResumeIntent(events: readonly SessionEvent[]): boolean {
+  const calls = new Map<string, { readonly name: string; readonly sequence: number }>()
+  let latestActivation = -1
+  let latestStop = -1
+  for (const event of events) {
+    if (event.type === 'tool/call') {
+      const callId = String(event.data.callId)
+      calls.set(callId, { name: event.data.name, sequence: event.seq })
+      if (event.data.name === RUNTIME_TOOL_NAMES.stop) latestStop = Math.max(latestStop, event.seq)
+      continue
+    }
+    if (event.type !== 'tool/result') continue
+    const call = calls.get(String(event.data.message.source.callId))
+    if (call?.name !== ACTIVATE_TOOL_NAME_FOR_RECOVERY) continue
+    if (toolResultJson(event)?.activated === true) latestActivation = Math.max(latestActivation, call.sequence)
+  }
+  return latestActivation >= 0 && latestActivation > latestStop
+}
+
+// Kept local to avoid a runtime cycle from runtime.ts back through controller.ts.
+const ACTIVATE_TOOL_NAME_FOR_RECOVERY = 'alphasolve_activate'
+
+type RestoreProbe =
+  | { readonly candidate: false; readonly workspace: string; readonly reason?: string }
+  | { readonly candidate: true; readonly workspace: string }
+
+/** Read-only, fail-closed eligibility check before taking a workspace lock. */
+async function probeRuntimeRestore(agent: Agent): Promise<RestoreProbe> {
+  const workspace = agent.session.header.cwd ?? ''
+  if (!hasDurableAlphaSolveResumeIntent(agent.session.events)) {
+    return { candidate: false, workspace }
+  }
+  let canonical: string
+  try {
+    canonical = await canonicalWorkspace(agent.session.header.cwd)
+  } catch (error) {
+    return { candidate: false, workspace, reason: errorMessage(error) }
+  }
+
+  const statePath = await resolveWorkspacePath(canonical, '.alphasolve/state.json', { mustExist: false })
+  let state: SessionState
+  try {
+    state = parseSessionState(await readJsonObject(statePath), statePath)
+  } catch (error) {
+    if (isMissing(error)) {
+      return {
+        candidate: false,
+        workspace: canonical,
+        reason: 'persisted AlphaSolve activation exists but .alphasolve/state.json is missing',
+      }
+    }
+    return { candidate: false, workspace: canonical, reason: errorMessage(error) }
+  }
+
+  // A different durable session never inherits activation merely because the
+  // user selected the same directory. It remains dormant and may use the
+  // ordinary explicit preflight, which will report workspace ownership.
+  if (state.sessionId !== String(agent.id)) return { candidate: false, workspace: canonical }
+  if (state.workspace !== canonical) {
+    return {
+      candidate: false,
+      workspace: canonical,
+      reason: 'persisted AlphaSolve workspace does not match this session workspace',
+    }
+  }
+
+  let snapshot: WorkspaceSnapshot
+  try {
+    snapshot = await snapshotWorkspace(canonical)
+  } catch (error) {
+    return { candidate: false, workspace: canonical, reason: errorMessage(error) }
+  }
+  if (snapshot.problem.digest !== state.problemDigest) {
+    return {
+      candidate: false,
+      workspace: canonical,
+      reason: 'problem.md changed since AlphaSolve was active; request AlphaSolve explicitly to begin a new generation',
+    }
+  }
+
+  if (state.status === 'solved') {
+    try {
+      const completions = await new RuntimeStore(canonical).listCompletions()
+      const undeliveredSolved = completions.some(completion => (
+        completion.solved
+        && completion.problemDigest === state.problemDigest
+        && completion.deliveredByCallId === undefined
+      ))
+      const curatorNeedsRecovery = await hasRecoverableCuratorTasks(canonical)
+      if (!undeliveredSolved && !curatorNeedsRecovery) {
+        return { candidate: false, workspace: canonical }
+      }
+    } catch (error) {
+      return { candidate: false, workspace: canonical, reason: errorMessage(error) }
+    }
+  }
+  return { candidate: true, workspace: canonical }
 }
 
 function committedToolCallIds(agent: Agent): Set<string> {
@@ -333,18 +495,21 @@ export class AlphaSolveRuntime {
     defaults: AlphaSolveRuntimeDefaults,
     onDisposed: () => void,
     signal?: AbortSignal,
+    mode: ActivationMode = 'explicit',
   ): Promise<{ readonly runtime: AlphaSolveRuntime; readonly resumed: boolean }> {
     throwIfActivationCancelled(signal)
     if (request.capacity !== undefined) positiveInteger(request.capacity, 'capacity')
     const snapshot = await snapshotWorkspace(agent.session.header.cwd)
     throwIfActivationCancelled(signal)
-    const loaded = await loadAlphaSolveConfig(snapshot.root, {
-      ...(request.capacity === undefined ? {} : { promptCapacity: request.capacity }),
-      ...(defaults.defaultCapacity === undefined ? {} : { defaultCapacity: defaults.defaultCapacity }),
-      ...(defaults.defaultDetailedTrace === undefined ? {} : {
-        defaultDetailedTrace: defaults.defaultDetailedTrace,
-      }),
-    })
+    const loaded = mode === 'explicit'
+      ? await loadAlphaSolveConfig(snapshot.root, {
+          ...(request.capacity === undefined ? {} : { promptCapacity: request.capacity }),
+          ...(defaults.defaultCapacity === undefined ? {} : { defaultCapacity: defaults.defaultCapacity }),
+          ...(defaults.defaultDetailedTrace === undefined ? {} : {
+            defaultDetailedTrace: defaults.defaultDetailedTrace,
+          }),
+        })
+      : undefined
     throwIfActivationCancelled(signal)
 
     await initializeWorkspace(snapshot.root)
@@ -358,8 +523,32 @@ export class AlphaSolveRuntime {
       if (latest.problem.digest !== snapshot.problem.digest) {
         throw new Error('problem.md changed while AlphaSolve activation was being prepared; retry explicitly')
       }
+      let recoveredConfig: AlphaSolveConfig | undefined
+      if (mode === 'session-resume') {
+        const statePath = await resolveWorkspacePath(snapshot.root, '.alphasolve/state.json', { mustExist: true })
+        const persisted = parseSessionState(await readJsonObject(statePath), statePath)
+        if (persisted.sessionId !== String(agent.id)) {
+          throw new Error('persisted AlphaSolve state belongs to a different session')
+        }
+        if (persisted.workspace !== latest.root) {
+          throw new Error('persisted AlphaSolve workspace changed during session recovery')
+        }
+        if (persisted.problemDigest !== latest.problem.digest) {
+          throw new Error('problem.md changed during AlphaSolve session recovery')
+        }
+        recoveredConfig = {
+          capacity: persisted.capacity,
+          detailedTrace: persisted.detailedTrace,
+          models: persisted.modelOverrides,
+        }
+      }
+      const activationConfig = recoveredConfig ?? loaded?.resolved
+      if (activationConfig === undefined) throw new Error('AlphaSolve activation configuration is unavailable')
       let store = new RuntimeStore(snapshot.root)
-      let opened = await store.open(initialState(agent, latest, loaded.resolved))
+      let opened = await store.open(initialState(agent, latest, activationConfig))
+      if (mode === 'session-resume') {
+        if (!opened.resumed) throw new Error('persisted AlphaSolve state disappeared during session recovery')
+      }
       // Validate first, then recover crash-left terminal worker snapshots. The
       // archive path below is allowed only after all ledgers and the curator
       // queue have passed their strict parsers.
@@ -373,9 +562,20 @@ export class AlphaSolveRuntime {
       const terminalRecovery = sameProblem
         && terminalCompletion !== undefined
         && (terminalCompletion.deliveredByCallId === undefined || curatorNeedsRecovery)
+      let preservePersistedConfig = opened.resumed
+        && store.currentState().sessionId === String(agent.id)
+        && store.currentState().workspace === latest.root
+        && sameProblem
 
       let resumed = opened.resumed
-      if (!terminalRecovery) {
+      if (mode === 'session-resume') {
+        if (store.currentState().status === 'solved' && !terminalRecovery) {
+          throw new Error('completed AlphaSolve session has no undelivered recovery work')
+        }
+        if (latest.solutionExists && !terminalRecovery) {
+          throw new Error('solution.md appeared while AlphaSolve was interrupted; request AlphaSolve explicitly to resolve it')
+        }
+      } else if (!terminalRecovery) {
         if (latest.solutionExists && request.overwriteSolution !== true) {
           throw new ExistingSolutionConfirmationError(snapshot.root)
         }
@@ -383,23 +583,32 @@ export class AlphaSolveRuntime {
         const archived = await archivePreviousGeneration(snapshot.root, latest.problem.digest)
         if (archived) {
           store = new RuntimeStore(snapshot.root)
-          opened = await store.open(initialState(agent, latest, loaded.resolved))
+          opened = await store.open(initialState(agent, latest, activationConfig))
           resumed = false
+          preservePersistedConfig = false
         }
       }
       throwIfActivationCancelled(signal)
       if (store.currentState().problemDigest !== latest.problem.digest) {
         throw new Error('persisted AlphaSolve state belongs to a different problem generation')
       }
+      const persistedConfig = store.currentState()
+      const runtimeConfig: AlphaSolveConfig = preservePersistedConfig
+        ? {
+            capacity: request.capacity ?? persistedConfig.capacity,
+            detailedTrace: persistedConfig.detailedTrace,
+            models: persistedConfig.modelOverrides,
+          }
+        : activationConfig
       await store.updateState(state => {
         const next: SessionState = {
           ...state,
           sessionId: String(agent.id),
           workspace: latest.root,
           status: terminalRecovery ? 'solved' : 'active',
-          capacity: loaded.resolved.capacity,
-          detailedTrace: loaded.resolved.detailedTrace,
-          modelOverrides: loaded.resolved.models,
+          capacity: runtimeConfig.capacity,
+          detailedTrace: runtimeConfig.detailedTrace,
+          modelOverrides: runtimeConfig.models,
           ...(latest.hint === undefined ? {} : { hintDigest: latest.hint.digest }),
         }
         if (latest.hint !== undefined) return next
@@ -492,7 +701,7 @@ export class AlphaSolveRuntime {
         agent,
         lock,
         store,
-        loaded.resolved,
+        runtimeConfig,
         curator,
         roleService,
         manager,
@@ -504,8 +713,24 @@ export class AlphaSolveRuntime {
       throwIfActivationCancelled(signal)
       return { runtime, resumed }
     } catch (error) {
-      await curator?.stop()
-      await lock.release()
+      const cleanupErrors: unknown[] = []
+      try {
+        await curator?.stop()
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError)
+      }
+      try {
+        await lock.release()
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError)
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          'AlphaSolve runtime preparation failed and rollback was incomplete',
+          { cause: error },
+        )
+      }
       throw error
     }
   }
@@ -517,8 +742,9 @@ export class AlphaSolveRuntime {
     defaults: AlphaSolveRuntimeDefaults,
     onDisposed: () => void,
     signal?: AbortSignal,
+    mode: ActivationMode = 'explicit',
   ): Promise<{ readonly runtime: AlphaSolveRuntime; readonly resumed: boolean }> {
-    const prepared = await AlphaSolveRuntime.prepare(agent, request, defaults, onDisposed, signal)
+    const prepared = await AlphaSolveRuntime.prepare(agent, request, defaults, onDisposed, signal, mode)
     try {
       throwIfActivationCancelled(signal)
       const fiber = agent.ctx.plugin({
@@ -529,26 +755,42 @@ export class AlphaSolveRuntime {
       prepared.runtime.fiber = fiber
       await fiber
       throwIfActivationCancelled(signal)
+      const assembly = await agent.ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
+      throwIfActivationCancelled(signal)
+      if (!assembly.sections.some(section => section.name === 'alphasolve:orchestrator')) {
+        throw new AgentPresetPromptConflictError(
+          inspectAlphaSolveAgentCapabilities(agent).agentPreset,
+        )
+      }
       return prepared
     } catch (error) {
-      await prepared.runtime.dispose()
+      try {
+        await prepared.runtime.dispose()
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'AlphaSolve runtime publication failed and rollback was incomplete',
+          { cause: error },
+        )
+      }
       throw error
     }
   }
 
-  private visibleAllowedGlobals(ctx: Context): string[] {
-    return [...STANDARD_FILE_TOOLS, ...WEB_TOOLS]
-      .filter(name => ctx.tools.get(name) !== undefined)
+  private visibleAllowedInheritedTools(ctx: Context): string[] {
+    return [...ALPHASOLVE_REQUIRED_FILE_TOOLS, ...WEB_TOOLS]
+      .filter(name => ctx.tools.get(name, this.agent) !== undefined)
   }
 
   private narrowedIndexTools(ctx: Context): ToolDefinition[] {
     return (['write', 'edit'] as const).flatMap(name => {
-      const definition = ctx.tools.get(name)
+      const definition = ctx.tools.get(name, this.agent)
       return definition === undefined ? [] : [narrowedIndexTool(definition)]
     })
   }
 
   private install(ctx: Context): () => Promise<void> {
+    ctx.tools.presentAs('native')
     const runtimeTools = this.createRuntimeTools().filter(tool => (
       !this.terminalRecovery
       || tool.name === RUNTIME_TOOL_NAMES.wait
@@ -558,14 +800,14 @@ export class AlphaSolveRuntime {
     const indexTools = this.terminalRecovery ? [] : this.narrowedIndexTools(ctx)
     for (const tool of [...runtimeTools, ...projectTools, ...indexTools]) ctx.tools.register(tool)
 
-    const allowedGlobals = this.terminalRecovery ? [] : this.visibleAllowedGlobals(ctx)
+    const allowedInherited = this.terminalRecovery ? [] : this.visibleAllowedInheritedTools(ctx)
     const customNames = [...runtimeTools, ...projectTools].map(tool => tool.name)
     const policy = createRolePolicy('orchestrator', {
       workspace: this.workspace,
-      extraAllowedTools: [...customNames, ...allowedGlobals],
+      extraAllowedTools: [...customNames, ...allowedInherited],
     })
     installRolePermissionBoundary(ctx, policy)
-    ctx.tools.restrict({ allow: allowedGlobals })
+    ctx.tools.restrict({ allow: allowedInherited })
     ctx.systemPrompt.section({
       name: 'alphasolve:orchestrator',
       order: 50,
@@ -854,17 +1096,39 @@ export class AlphaSolveRuntime {
   private maybeDisposeAfterTerminalResult(): void {
     if (!this.turnSettled || (!this.solvedResultCommitted && !this.stopResultCommitted)) return
     const fiber = this.fiber
-    if (fiber !== undefined) void fiber.dispose()
+    if (fiber !== undefined) {
+      void fiber.dispose().catch((error: unknown) => {
+        this.agent.ctx.logger.warn(`AlphaSolve runtime unload failed: ${errorMessage(error)}`)
+      })
+    }
+  }
+
+  /** Release workspace ownership and always detach this runtime from its controller. */
+  private async releaseOwnership(): Promise<void> {
+    try {
+      await this.lock.release()
+    } finally {
+      // A failed unlink/assert must remain visible to the caller, but it must
+      // not leave a controller pointing at a fiber whose scoped tools have
+      // already been torn down.
+      if (!this.disposed) {
+        this.disposed = true
+        this.onDisposed()
+      }
+    }
   }
 
   private async shutdown(kind: ShutdownKind, releaseLock = true): Promise<void> {
     if (this.shutdownPromise !== undefined) {
-      await this.shutdownPromise
-      if (releaseLock) {
-        await this.lock.release()
-        if (!this.disposed) {
-          this.disposed = true
-          this.onDisposed()
+      try {
+        await this.shutdownPromise
+      } finally {
+        // A stop tool deliberately leaves the lock held until its result is
+        // durable. If that first shutdown failed, fiber disposal must still
+        // get a chance to release ownership instead of being short-circuited
+        // by the already-rejected promise.
+        if (releaseLock) {
+          await this.releaseOwnership()
         }
       }
       return
@@ -882,13 +1146,7 @@ export class AlphaSolveRuntime {
     try {
       await this.shutdownPromise
     } finally {
-      if (releaseLock) {
-        await this.lock.release()
-        if (!this.disposed) {
-          this.disposed = true
-          this.onDisposed()
-        }
-      }
+      if (releaseLock) await this.releaseOwnership()
     }
   }
 
@@ -906,6 +1164,13 @@ class ExistingSolutionConfirmationError extends Error {
   }
 }
 
+class AgentPresetPromptConflictError extends Error {
+  constructor(readonly agentPreset: string | undefined) {
+    super(AGENT_PRESET_BLOCKS_PROMPT_REASON)
+    this.name = 'AgentPresetPromptConflictError'
+  }
+}
+
 /** Convert activation failures into a stable preflight tool result. */
 export async function activateAlphaSolveRuntime(
   agent: Agent,
@@ -917,6 +1182,16 @@ export async function activateAlphaSolveRuntime(
   const workspace = agent.session.header.cwd ?? ''
   try {
     throwIfActivationCancelled(signal)
+    const capabilities = inspectAlphaSolveAgentCapabilities(agent)
+    if (capabilities.missingTools.length > 0) {
+      return {
+        activated: false,
+        workspace,
+        reason: AGENT_PRESET_MISSING_TOOLS_REASON,
+        ...(capabilities.agentPreset === undefined ? {} : { agentPreset: capabilities.agentPreset }),
+        missingTools: capabilities.missingTools,
+      }
+    }
     const { runtime, resumed } = await AlphaSolveRuntime.activate(agent, request, defaults, onDisposed, signal)
     return {
       activated: true,
@@ -934,10 +1209,79 @@ export async function activateAlphaSolveRuntime(
         reason: 'solution_exists_confirmation_required',
       }
     }
+    if (error instanceof AgentPresetPromptConflictError) {
+      return {
+        activated: false,
+        workspace,
+        reason: AGENT_PRESET_BLOCKS_PROMPT_REASON,
+        ...(error.agentPreset === undefined ? {} : { agentPreset: error.agentPreset }),
+      }
+    }
     return {
       activated: false,
       workspace,
       reason: errorMessage(error),
     }
+  }
+}
+
+/**
+ * Reattach a runtime only when the selected workspace carries durable active
+ * intent for this exact resumed session. This is recovery, never a new
+ * activation: it cannot archive a generation or authorize solution overwrite.
+ */
+export async function restoreAlphaSolveRuntime(
+  agent: Agent,
+  defaults: AlphaSolveRuntimeDefaults,
+  onDisposed: () => void,
+  signal?: AbortSignal,
+): Promise<RuntimeRestoreResult> {
+  const workspace = agent.session.header.cwd ?? ''
+  try {
+    throwIfActivationCancelled(signal)
+    const probe = await probeRuntimeRestore(agent)
+    throwIfActivationCancelled(signal)
+    if (!probe.candidate) {
+      return {
+        restored: false,
+        workspace: probe.workspace,
+        ...(probe.reason === undefined ? {} : { reason: probe.reason }),
+      }
+    }
+    const capabilities = inspectAlphaSolveAgentCapabilities(agent)
+    if (capabilities.missingTools.length > 0) {
+      return {
+        restored: false,
+        workspace: probe.workspace,
+        reason: AGENT_PRESET_MISSING_TOOLS_REASON,
+        ...(capabilities.agentPreset === undefined ? {} : { agentPreset: capabilities.agentPreset }),
+        missingTools: capabilities.missingTools,
+      }
+    }
+    const { runtime } = await AlphaSolveRuntime.activate(
+      agent,
+      {},
+      defaults,
+      onDisposed,
+      signal,
+      'session-resume',
+    )
+    return {
+      restored: true,
+      workspace: runtime.workspace,
+      capacity: runtime.store.currentState().capacity,
+      runtime,
+    }
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error
+    if (error instanceof AgentPresetPromptConflictError) {
+      return {
+        restored: false,
+        workspace,
+        reason: AGENT_PRESET_BLOCKS_PROMPT_REASON,
+        ...(error.agentPreset === undefined ? {} : { agentPreset: error.agentPreset }),
+      }
+    }
+    return { restored: false, workspace, reason: errorMessage(error) }
   }
 }

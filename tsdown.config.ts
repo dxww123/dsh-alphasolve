@@ -11,8 +11,6 @@ export default defineConfig({
   dts: false,
   deps: {
     neverBundle: [
-      'cordis',
-      'schemastery',
       /^@deepseek-ai\//,
     ],
   },

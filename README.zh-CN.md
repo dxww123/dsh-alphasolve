@@ -12,26 +12,30 @@ DeepSeek Harness。插件安装后默认休眠；只有用户明确提到 `Alpha
 当前版本针对以下 DSH snapshot 构建并通过测试：
 
 ```text
-branch: snapshots/20260806T160212Z-279244acb0
-commit: b3adbb736ae7dd3c7857eee5d97c82a3ac4ac96f
+branch: snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
+commit: 7b9644f2b664e46c9518506035aa6c8d5af4d8e8
+package version: 0.0.1-rc.2
 ```
 
-插件使用这一版 DSH 的 profile bundle 和 scoped Agent 生命周期接口。DSH snapshot
-之间是独立 root，切换版本时不要把旧 snapshot merge 或 rebase 到新 snapshot。
+插件使用这一版 DSH 的逐 session Agent preset、scoped tool registry、模型选择服务和
+scoped Cordis 包。请使用与上面 revision 一致的 DSH build；本兼容声明不覆盖其他
+snapshot。
 
 ## 安装
 
-先切换并安装上述 DSH 版本：
+先确认已安装的 `dsh` 来自上述兼容 snapshot。使用源码 checkout 时，在该精确 revision
+上构建：
 
 ```sh
 cd /path/to/deepseek-harness
 git fetch origin
-git switch snapshots/20260806T160212Z-279244acb0
-sh scripts/install.sh
-(cd ~/.dsh/source/current && pnpm run build)
+git switch snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
+pnpm install
+pnpm run build
 ```
 
-从 GitHub 安装插件时，建议锁定完整 commit SHA，并分别安装到 Web 和终端 profile：
+从 GitHub 安装插件时，建议锁定完整 commit SHA，并分别安装到 Web 和 Headless
+profile：
 
 ```sh
 gh auth login -h github.com
@@ -51,31 +55,51 @@ dsh plugin --profile headless add .
 检查两个 profile 的组合结果：
 
 ```sh
+dsh --version
+dsh plugin --profile web list --depth 0
+dsh plugin --profile headless list --depth 0
 dsh --profile web --dump-config
 dsh --profile headless --dump-config
 ```
 
-两份输出都应包含一条 `dsh-alphasolve`。自定义 profile 需要单独执行一次
-`dsh plugin --profile <name> add ...`。安装或升级后应重新启动对应的 `dsh` 或
+`dsh --version` 应输出 `0.0.1-rc.2`，两份依赖列表都应显示
+`@dsh-external/dsh-alphasolve`，两份 config dump 都应恰好包含一条
+`dsh-alphasolve`。Headless profile 必须使用当前的 `base + headless` 组合，不能包含
+Web bundle。自定义 profile 需要单独安装插件。安装或升级后应重新启动正在运行的
 `dsh web` 进程；仅刷新浏览器页面不会加载新代码。
 
 ## 使用
 
 在终端启动目录，或 `dsh web` 左侧工作区选择器选中的目录中，放置非空 UTF-8
-`problem.md`；`hint.md` 可选。终端使用：
+`problem.md`；`hint.md` 可选。
+
+Headless 是 one-shot surface：必须把完整的 AlphaSolve 请求作为 task 参数传入。它会
+创建一个新的持久化 session，打印最终回答，然后退出：
 
 ```sh
 cd /path/to/problem-workspace
-dsh --profile headless
+dsh --profile headless "请用 AlphaSolve 求解 problem.md，最多同时运行 2 个 worker。"
 ```
 
-Web 使用：
+长期运行的 Web surface 使用：
 
 ```sh
 dsh web
 ```
 
-然后向主 session 明确提出 AlphaSolve 求解请求，例如：
+选择包含 `problem.md` 的工作区，然后选择兼容的 Agent preset：
+
+| Web preset | AlphaSolve 行为 |
+|---|---|
+| `standard` | 支持。 |
+| `cordis` | 支持；AlphaSolve 对各 role 的更窄权限仍然生效。 |
+| `code` | 支持。AlphaSolve 激活期间使用 native 工具呈现，`run_code` 仍被禁止；卸载后恢复 Code Mode。 |
+| `minimal` | 返回 `agent_preset_missing_required_tools` 并拒绝激活；插件不会暗中补充缺少的权限。 |
+
+自定义 preset 必须同时提供 `read`、`write`、`edit`、`glob` 和 `grep`，并且不能用
+complete system prompt 压掉 AlphaSolve 的工作流 section；否则插件会返回
+`agent_preset_blocks_alphasolve_prompt` 并拒绝激活。在 Web 主 session 中明确提出
+AlphaSolve 求解请求，例如：
 
 ```text
 请用 AlphaSolve 求解当前工作区 problem.md 中的问题，最多同时运行 2 个 worker。
@@ -89,10 +113,17 @@ AlphaSolve、明确说不要使用它、写成 `alpha solve` 或 `alpha-solve` �
 worker 并发容量默认是 `2`，可以在触发消息中明确指定。运行中也可以让主 session
 调整容量；降低容量不会取消已经运行的 worker。
 
+Web 进程重启后，只要重新打开的是同一个 session 和同一个工作区，插件就会在首条
+后续消息交给模型前自动恢复此前已经激活的 AlphaSolve runtime；此时只说“继续”即可。
+新 session、其他 session，以及已经调用过 `alphasolve_stop` 的 session 仍保持休眠，
+必须重新明确提出包含 AlphaSolve 关键词的求解请求。Headless 的每个 one-shot task
+始终创建新 session，不提供交互式续跑命令。
+
 ## 工作流程
 
-1. 休眠 controller 检查直接用户消息；关键词和求解意图命中后，先确认工作区、
-   `problem.md`、可选 `hint.md` 以及已有 `solution.md`。
+1. 休眠 controller 检查直接用户消息；关键词和求解意图命中后，先确认当前 session
+   的 Agent preset、必需文件工具、工作区、`problem.md`、可选 `hint.md` 以及已有
+   `solution.md`。
 2. preflight 通过后，只为当前 session 创建 runtime，并建立 `knowledge/`、
    `unverified_propositions/`、`verified_propositions/` 和 `.alphasolve/`。
 3. 主 session 通过 `alphasolve_worker` 异步启动 worker；达到容量时不会排队。
@@ -113,7 +144,12 @@ worker 并发容量默认是 `2`，可以在触发消息中明确指定。运行
 6. 当一个 verified proposition 解决原题时，插件原子写入 `solution.md`。最后一个成功
    工具结果先写入 session，runtime 随后在下一 step 前卸载。尚未求解时 runtime 继续
    驻留，等待用户指导或后续 worker。
+7. 同 session 恢复时，插件会核对 session 标识、工作区和 `problem.md` digest，并恢复
+   已持久化的容量及模型设置。旧进程结束时仍在运行的 worker 会保留已有 artifacts，
+   并且只生成一次 `interrupted` 完成项；主 session 读取后可重新派发替代 worker。插件
+   不会伪装成能从某个 LLM workflow 阶段的中间位置继续执行。
 
-所有 worker 都是 fresh Agent，不能使用 shell、通用代码执行、Web 或任意 subagent。
-AlphaSolve 工具、prompt、并发状态和权限只属于触发它的 session；同一 `dsh web`
-进程中的其他 session 不会因此新增 AlphaSolve 工具。
+所有 worker 都是 fresh Agent：先加入主 session 正在使用的同一 preset generation，
+再叠加 AlphaSolve 针对各 role 的权限收窄。worker 不能使用 shell、`run_code`、Web 或
+任意 subagent。AlphaSolve 工具、native 呈现覆盖、prompt、并发状态和权限只属于触发
+它的 session；同一 `dsh web` 进程中的其他 session 不会因此新增这些能力。

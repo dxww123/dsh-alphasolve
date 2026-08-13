@@ -51,29 +51,38 @@
     "url": "https://github.com/dsh-external/dsh-alphasolve"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-agent": "^0.0.1",
-    "@deepseek-ai/dsh-atomic-write": "^0.0.1",
-    "@deepseek-ai/dsh-llm": "^0.0.1",
-    "@deepseek-ai/dsh-session": "^0.0.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.0.1",
-    "@deepseek-ai/dsh-tools": "^0.0.1",
-    "cordis": "^4.0.0-rc.7",
-    "schemastery": "^3.18.0"
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-agent": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-agent-presets": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.0.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.0.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.1-rc.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent-presets": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/cordis-plugin-loader": "link:../deepseek-harness/vendor/loader",
     "@deepseek-ai/dsh-agent": "link:../deepseek-harness/packages/core/agent",
-    "@deepseek-ai/dsh-atomic-write": "link:../deepseek-harness/packages/util/atomic-write",
     "@deepseek-ai/dsh-agent-loop": "link:../deepseek-harness/packages/core/agent-loop",
-    "@deepseek-ai/dsh-agent-loop-testkit": "link:../deepseek-harness/packages/support/agent-loop-testkit",
+    "@deepseek-ai/dsh-agent-loop-testkit": "link:../deepseek-harness/packages/test-support/agent-loop-testkit",
+    "@deepseek-ai/dsh-agent-presets": "link:../deepseek-harness/packages/preset/agent-presets",
+    "@deepseek-ai/dsh-atomic-write": "link:../deepseek-harness/packages/util/atomic-write",
+    "@deepseek-ai/dsh-code-runtime": "link:../deepseek-harness/packages/code-runtime/code-runtime",
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
     "@deepseek-ai/dsh-session": "link:../deepseek-harness/packages/core/session",
     "@deepseek-ai/dsh-system-prompt": "link:../deepseek-harness/packages/core/system-prompt",
     "@deepseek-ai/dsh-tool-fs": "link:../deepseek-harness/packages/fs/tool-fs",
     "@deepseek-ai/dsh-tool-fs-search": "link:../deepseek-harness/packages/fs/tool-fs-search",
     "@deepseek-ai/dsh-tools": "link:../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../deepseek-harness/vendor/schemastery",
     "@types/node": "^22.20.0",
-    "cordis": "link:../deepseek-harness/vendor/cordis",
-    "schemastery": "link:../deepseek-harness/vendor/schemastery",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

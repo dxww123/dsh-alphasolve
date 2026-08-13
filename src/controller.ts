@@ -1,16 +1,22 @@
 /** Dormant global controller and one-turn, session-scoped AlphaSolve preflight. */
 
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-agent-presets'
+import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 
 import {
+  AGENT_PRESET_BLOCKS_PROMPT_REASON,
+  AGENT_PRESET_MISSING_TOOLS_REASON,
   activateAlphaSolveRuntime,
+  inspectAlphaSolveAgentCapabilities,
+  restoreAlphaSolveRuntime,
   type AlphaSolveRuntime,
   type AlphaSolveRuntimeDefaults,
   type RuntimeActivationRequest,
   type RuntimeActivationResult,
+  type RuntimeRestoreResult,
 } from './runtime.js'
 
 export const ACTIVATE_TOOL_NAME = 'alphasolve_activate'
@@ -25,16 +31,28 @@ For an affirmative solve request:
 3. Pass a positive integer capacity only when this direct request explicitly specifies the maximum worker count. Otherwise omit it; project/user/default precedence applies.
 4. After the user explicitly authorizes overwrite, call alphasolve_activate with overwriteSolution=true. The confirmation turn does not need to repeat the AlphaSolve keyword.
 
+If activation reports agent_preset_missing_required_tools, explain which tools are missing and ask the user to use an Agent preset that provides the standard read/write/edit/glob/grep filesystem tools. Do not attempt to widen the preset yourself.
+
+If activation reports agent_preset_blocks_alphasolve_prompt, explain that the selected preset enforces a complete system prompt which suppresses the AlphaSolve workflow instructions, and ask the user to choose standard, cordis, code, or a compatible custom preset.
+
 Never use bash or arbitrary code to perform these checks.`
 
 export interface ControllerOptions extends AlphaSolveRuntimeDefaults {
   /** Test seam; production mounts the real runtime. */
   readonly activate?: typeof activateAlphaSolveRuntime
+  /** Test seam; production restores the real runtime on a cold session resume. */
+  readonly restore?: typeof restoreAlphaSolveRuntime
 }
 
 interface PreflightState {
   readonly kind: 'preflight'
   readonly dispose: () => void
+  /** Reinstate native presentation plus the read-only preflight catalog. */
+  readonly resumeToolIsolation: () => void
+  /** Yield both leases while the runtime discovers the parent preset's full catalog. */
+  readonly suspendToolIsolation: () => void
+  readonly agentPreset?: string
+  readonly missingRequiredTools: readonly string[]
   awaitingConfirmation: boolean
   confirmationResponseStarted: boolean
 }
@@ -44,7 +62,13 @@ interface RuntimeState {
   readonly runtime: AlphaSolveRuntime
 }
 
-type ControllerState = PreflightState | RuntimeState
+interface RestoringState {
+  readonly kind: 'restoring'
+  readonly abort: AbortController
+  done?: Promise<void>
+}
+
+type ControllerState = PreflightState | RestoringState | RuntimeState
 
 function messageText(message: UserMessage): string {
   return message.content
@@ -98,6 +122,8 @@ function publicActivationResult(result: RuntimeActivationResult): Record<string,
     ...(result.reason === undefined ? {} : { reason: result.reason }),
     ...(result.capacity === undefined ? {} : { capacity: result.capacity }),
     ...(result.resumed === undefined ? {} : { resumed: result.resumed }),
+    ...(result.agentPreset === undefined ? {} : { agentPreset: result.agentPreset }),
+    ...(result.missingTools === undefined ? {} : { missingTools: [...result.missingTools] }),
   }
 }
 
@@ -105,15 +131,22 @@ function publicActivationResult(result: RuntimeActivationResult): Record<string,
 export class AlphaSolveController {
   private readonly states = new Map<Agent, ControllerState>()
   private readonly activate: typeof activateAlphaSolveRuntime
+  private readonly restore: typeof restoreAlphaSolveRuntime
 
   constructor(
     private readonly ctx: Context,
     private readonly options: ControllerOptions = {},
   ) {
     this.activate = options.activate ?? activateAlphaSolveRuntime
+    this.restore = options.restore ?? restoreAlphaSolveRuntime
   }
 
   install(): () => Promise<void> {
+    this.ctx.on('agent/session-start', ({ agent, source }) => {
+      if (source !== 'resume' || this.states.has(agent) || !isTopLevelAgent(agent)) return
+      this.beginRestore(agent)
+    })
+
     // Claiming happens immediately before prompt/tool assembly. Install the
     // scoped preflight synchronously here so its section and activation tool
     // are present in the frozen assembly for the triggering step. pre-step
@@ -156,47 +189,161 @@ export class AlphaSolveController {
       }
     })
 
-    this.ctx.on('agent/disposed', ({ agent }) => {
+    this.ctx.on('agent/disposed', async ({ agent }) => {
       const state = this.states.get(agent)
       this.states.delete(agent)
       if (state?.kind === 'preflight') state.dispose()
-      else if (state?.kind === 'runtime') void state.runtime.dispose()
+      else if (state?.kind === 'runtime') await state.runtime.dispose()
+      else if (state?.kind === 'restoring') state.abort.abort(new Error('AlphaSolve restoring agent was disposed'))
     })
 
     return async () => {
       const states = [...this.states.entries()]
       this.states.clear()
-      await Promise.allSettled(states.map(([, state]) => state.kind === 'preflight'
-        ? state.dispose()
-        : state.runtime.dispose()))
+      for (const [, state] of states) {
+        if (state.kind === 'restoring') state.abort.abort(new Error('AlphaSolve controller was disposed'))
+      }
+      await Promise.allSettled(states.map(([, state]) => {
+        if (state.kind === 'preflight') return Promise.resolve(state.dispose())
+        if (state.kind === 'runtime') return state.runtime.dispose()
+        return state.done ?? Promise.resolve()
+      }))
     }
+  }
+
+  private beginRestore(agent: Agent): void {
+    const state: RestoringState = { kind: 'restoring', abort: new AbortController() }
+    this.states.set(agent, state)
+    try {
+      state.done = agent.runMaintenance(async (agentSignal) => {
+        const signal = AbortSignal.any([agentSignal, state.abort.signal])
+        let runtimeRef: AlphaSolveRuntime | undefined
+        try {
+          const result: RuntimeRestoreResult = await this.restore(
+            agent,
+            {
+              ...(this.options.defaultCapacity === undefined ? {} : {
+                defaultCapacity: this.options.defaultCapacity,
+              }),
+              ...(this.options.defaultDetailedTrace === undefined ? {} : {
+                defaultDetailedTrace: this.options.defaultDetailedTrace,
+              }),
+            },
+            () => {
+              const current = this.states.get(agent)
+              if (current?.kind === 'runtime' && current.runtime === runtimeRef) this.states.delete(agent)
+            },
+            signal,
+          )
+          if (signal.aborted) {
+            if (result.restored) await result.runtime.dispose()
+            throw signal.reason ?? new DOMException('AlphaSolve session recovery cancelled', 'AbortError')
+          }
+          if (this.states.get(agent) !== state) {
+            if (result.restored) await result.runtime.dispose()
+            return
+          }
+          if (!result.restored) {
+            this.states.delete(agent)
+            if (result.reason !== undefined) this.injectRestoreDiagnostic(agent, result)
+            return
+          }
+          runtimeRef = result.runtime
+          this.states.set(agent, { kind: 'runtime', runtime: result.runtime })
+        } catch (error) {
+          if (this.states.get(agent) !== state) return
+          this.states.delete(agent)
+          if (!signal.aborted) this.injectRestoreDiagnostic(agent, error instanceof Error ? error.message : String(error))
+        }
+      })
+      void state.done.catch((error: unknown) => {
+        if (this.states.get(agent) !== state) return
+        this.states.delete(agent)
+        if (!state.abort.signal.aborted) {
+          this.injectRestoreDiagnostic(agent, error instanceof Error ? error.message : String(error))
+        }
+      })
+    } catch (error) {
+      if (this.states.get(agent) === state) this.states.delete(agent)
+      this.injectRestoreDiagnostic(agent, error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  private injectRestoreDiagnostic(
+    agent: Agent,
+    failure: string | Extract<RuntimeRestoreResult, { restored: false }>,
+  ): void {
+    let reason = typeof failure === 'string' ? failure : (failure.reason ?? 'unknown recovery failure')
+    if (typeof failure !== 'string'
+      && failure.reason === AGENT_PRESET_MISSING_TOOLS_REASON
+      && failure.missingTools !== undefined) {
+      const owner = failure.agentPreset === undefined
+        ? 'the current Agent composition'
+        : `Agent preset "${failure.agentPreset}"`
+      reason = `${failure.reason}: ${owner} is missing ${failure.missingTools.join(', ')}`
+    } else if (typeof failure !== 'string'
+      && failure.reason === AGENT_PRESET_BLOCKS_PROMPT_REASON) {
+      const owner = failure.agentPreset === undefined
+        ? 'the current Agent composition'
+        : `Agent preset "${failure.agentPreset}"`
+      reason = `${failure.reason}: ${owner} suppresses the AlphaSolve workflow prompt`
+    }
+    const concise = reason.replaceAll(/\s+/g, ' ').slice(0, 500)
+    agent.inject(createUserMessage({
+      content: [{
+        type: 'text',
+        text: `AlphaSolve could not restore this resumed session automatically: ${concise}. The runtime remains dormant; ask explicitly with the AlphaSolve keyword after resolving the problem.`,
+      }],
+      source: { kind: 'plugin', plugin: 'dsh-alphasolve' },
+    }))
   }
 
   private mountPreflight(agent: Agent): PreflightState {
     const disposers: Array<() => void> = []
     let disposed = false
+    let nativePresentation: (() => void) | undefined
+    let inheritedRestriction: (() => void) | undefined
+    const ctx = agent.ctx
+    const capabilities = inspectAlphaSolveAgentCapabilities(agent)
+    const allowedInherited = ['read'].filter(name => ctx.tools.get(name, agent) !== undefined)
+    const resumeToolIsolation = (): void => {
+      if (disposed) throw new Error('cannot reacquire AlphaSolve preflight presentation after disposal')
+      nativePresentation ??= ctx.tools.presentAs('native')
+      inheritedRestriction ??= ctx.tools.restrict({ allow: allowedInherited })
+    }
+    const suspendToolIsolation = (): void => {
+      const disposeRestriction = inheritedRestriction
+      inheritedRestriction = undefined
+      disposeRestriction?.()
+      const disposePresentation = nativePresentation
+      nativePresentation = undefined
+      disposePresentation?.()
+    }
     const state: PreflightState = {
       kind: 'preflight',
+      resumeToolIsolation,
+      suspendToolIsolation,
+      ...(capabilities.agentPreset === undefined ? {} : { agentPreset: capabilities.agentPreset }),
+      missingRequiredTools: capabilities.missingTools,
       awaitingConfirmation: false,
       confirmationResponseStarted: false,
       dispose: () => {
         if (disposed) return
         disposed = true
+        suspendToolIsolation()
         for (const dispose of disposers.splice(0).reverse()) dispose()
       },
     }
     this.states.set(agent, state)
     try {
-      const ctx = agent.ctx
+      resumeToolIsolation()
       disposers.push(ctx.systemPrompt.section({
         name: 'alphasolve:preflight',
         order: 50,
         text: PREFLIGHT_PROMPT,
       }))
       disposers.push(ctx.tools.register(this.activationTool(agent, state)))
-      const allowedGlobals = ['read'].filter(name => ctx.tools.get(name) !== undefined)
-      disposers.push(ctx.tools.restrict({ allow: allowedGlobals }))
-      const allowed = new Set([ACTIVATE_TOOL_NAME, ...allowedGlobals])
+      const allowed = new Set([ACTIVATE_TOOL_NAME, ...allowedInherited])
       disposers.push(ctx.tools.guard(execution => allowed.has(execution.name)
         ? undefined
         : `tool "${execution.name}" is unavailable during AlphaSolve preflight`))
@@ -234,6 +381,15 @@ export class AlphaSolveController {
         }
         if (this.states.get(agent) !== state) throw new Error('AlphaSolve preflight is no longer active')
         const request = activationRequest(args)
+        if (state.missingRequiredTools.length > 0) {
+          return {
+            activated: false,
+            workspace: agent.session.header.cwd ?? '',
+            reason: AGENT_PRESET_MISSING_TOOLS_REASON,
+            ...(state.agentPreset === undefined ? {} : { agentPreset: state.agentPreset }),
+            missingTools: [...state.missingRequiredTools],
+          }
+        }
         if (request.overwriteSolution === true
           && (!state.awaitingConfirmation || !state.confirmationResponseStarted)) {
           return {
@@ -243,28 +399,40 @@ export class AlphaSolveController {
           }
         }
         let runtimeRef: AlphaSolveRuntime | undefined
-        const result = await this.activate(
-          agent,
-          request,
-          {
-            ...(this.options.defaultCapacity === undefined ? {} : {
-              defaultCapacity: this.options.defaultCapacity,
-            }),
-            ...(this.options.defaultDetailedTrace === undefined ? {} : {
-              defaultDetailedTrace: this.options.defaultDetailedTrace,
-            }),
-          },
-          () => {
-            const current = this.states.get(agent)
-            if (current?.kind === 'runtime' && current.runtime === runtimeRef) this.states.delete(agent)
-          },
-          exec.signal,
-        )
+        // Runtime installation must inspect the complete parent-preset tool
+        // catalog. Keep the execution guard in place across this hand-off so
+        // yielding Code Mode/read-only presentation never widens what this
+        // in-flight preflight turn can execute.
+        state.suspendToolIsolation()
+        let result: RuntimeActivationResult
+        try {
+          result = await this.activate(
+            agent,
+            request,
+            {
+              ...(this.options.defaultCapacity === undefined ? {} : {
+                defaultCapacity: this.options.defaultCapacity,
+              }),
+              ...(this.options.defaultDetailedTrace === undefined ? {} : {
+                defaultDetailedTrace: this.options.defaultDetailedTrace,
+              }),
+            },
+            () => {
+              const current = this.states.get(agent)
+              if (current?.kind === 'runtime' && current.runtime === runtimeRef) this.states.delete(agent)
+            },
+            exec.signal,
+          )
+        } catch (error) {
+          if (!exec.signal.aborted) state.resumeToolIsolation()
+          throw error
+        }
         if (exec.signal.aborted) {
           if (result.activated) await result.runtime.dispose()
           throw exec.signal.reason ?? new DOMException('AlphaSolve activation cancelled', 'AbortError')
         }
         if (!result.activated) {
+          state.resumeToolIsolation()
           if (result.reason === 'solution_exists_confirmation_required') {
             state.awaitingConfirmation = true
             state.confirmationResponseStarted = false

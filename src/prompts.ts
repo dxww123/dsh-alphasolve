@@ -129,8 +129,6 @@ export function buildGeneratorTask(input: GeneratorTaskInput): string {
 }
 
 export interface VerifierTaskInput {
-  /** Retained for source compatibility; verifier prompts deliberately never expose the original problem. */
-  problem: string
   propositionPath: string
   propositionText: string
   workflowIndex: number
@@ -187,7 +185,6 @@ export function buildReviewVerdictTask(review: string, workflowIndex: number, at
 }
 
 export function buildReviserTask(
-  _problem: string,
   propositionPath: string,
   review: string,
   workflowIndex: number,

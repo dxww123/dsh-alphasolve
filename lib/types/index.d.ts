@@ -1,6 +1,6 @@
 /** AlphaSolve for DSH: dormant controller with session-scoped hot activation. */
-import type { Context } from 'cordis';
-import z from 'schemastery';
+import type { Context } from '@deepseek-ai/cordis';
+import z from '@deepseek-ai/schemastery';
 export * from './controller.js';
 export * from './runtime.js';
 export * from './types.js';

@@ -1,5 +1,5 @@
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { AgentLlmTarget } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import {
   MODEL_ROLES,
   type AlphaSolveConfig,
@@ -181,24 +181,24 @@ export function resolveAlphaSolveConfig(options: ResolveConfigOptions = {}): Alp
 export type ModelAvailabilityCheck = (provider: string, model: string) => boolean
 
 /**
- * Resolve a complete immutable target for a newly-created role Agent.
+ * Resolve a complete immutable model selection for a newly-created role Agent.
  * Existing Agents retain the previously resolved object when configuration changes.
  */
-export function resolveRoleLlmTarget(
+export function resolveRoleModelSelection(
   role: ModelRole,
-  inherited: AgentLlmTarget,
+  inherited: ModelSelection,
   overrides: Readonly<Partial<Record<ModelRole, ModelOverride>>> = {},
   isAvailable?: ModelAvailabilityCheck,
-): AgentLlmTarget {
+): ModelSelection {
   const override = overrides[role]
   const provider = override?.provider ?? inherited.provider
   const model = override?.model ?? inherited.model
   const effort = override?.reasoningEffort ?? inherited.reasoningEffort
 
-  parseNonEmptyString(provider, 'resolved model target', `${role}.provider`)
-  parseNonEmptyString(model, 'resolved model target', `${role}.model`)
+  parseNonEmptyString(provider, 'resolved model selection', `${role}.provider`)
+  parseNonEmptyString(model, 'resolved model selection', `${role}.model`)
   if (isAvailable !== undefined && !isAvailable(provider, model)) {
-    throw new Error(`model target for role "${role}" is not registered: ${provider}/${model}`)
+    throw new Error(`model selection for role "${role}" is not registered: ${provider}/${model}`)
   }
 
   return Object.freeze({

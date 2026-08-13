@@ -1,6 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type { PreToolDecision, ToolExecution, ToolGuard } from '@deepseek-ai/dsh-tools'
 
 /** Agent roles which receive an AlphaSolve-scoped filesystem view. */

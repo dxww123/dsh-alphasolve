@@ -2,13 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { Context } from 'cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRegistry from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 
 import { CALCULATOR_TOOL_NAME } from '../src/calculator.js'
 import { createCuratorKnowledgeTools } from '../src/curator-tools.js'
@@ -111,7 +111,7 @@ async function toolContext(): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRegistry)
+  await ctx.plugin(ToolRuntime)
   return ctx
 }
 
@@ -141,7 +141,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
     const verifier = calls[0]
     expect(verifier).toBeDefined()
     expect(verifier?.role).toBe('verifier_citation')
-    expect(verifier?.modelTarget).toEqual({
+    expect(verifier?.modelSelection).toEqual({
       provider: 'main-provider',
       model: 'strict-verifier',
       reasoningEffort: 'high',
@@ -344,15 +344,15 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
       signal: new AbortController().signal,
     })).resolves.toBe('finite-field-bound')
     expect(calls[0]).toMatchObject({
-      role: 'generator', maxTurns: 1, allowedGlobalTools: [],
-      modelTarget: { provider: 'main-provider', model: 'namer-model', reasoningEffort: 'high' },
+      role: 'generator', maxTurns: 1, allowedInheritedTools: [],
+      modelSelection: { provider: 'main-provider', model: 'namer-model', reasoningEffort: 'high' },
     })
     expect(calls[0]?.setupHelpers).toBeUndefined()
 
     await expect(service.runResearchReview({ signal: new AbortController().signal })).resolves.toBe('review')
     expect(calls[1]).toMatchObject({
       role: 'research_reviewer',
-      modelTarget: { provider: 'survey-provider', model: 'main-model', reasoningEffort: 'high' },
+      modelSelection: { provider: 'survey-provider', model: 'main-model', reasoningEffort: 'high' },
     })
     expect(calls[1]?.setupHelpers).toBeDefined()
     expect(calls[1]?.permissionPolicy.paths.some(rule => rule.root.includes('unverified_propositions'))).toBe(false)
@@ -389,7 +389,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
 
     await service.runCurator({ task, tools: knowledgeTools, signal: new AbortController().signal })
     expect(curatorOptions?.role).toBe('curator')
-    expect(curatorOptions?.allowedGlobalTools).toEqual([])
+    expect(curatorOptions?.allowedInheritedTools).toEqual([])
     expect(childCtx.tools.schemas().map(schema => schema.name).sort()).toEqual([
       ...Object.values(CURATOR_TOOL_NAMES),
       SUBAGENT_TOOL_NAME,

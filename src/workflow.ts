@@ -378,7 +378,6 @@ async function runVerificationRound(
   options: FixedWorkflowOptions,
   context: WorkerExecutionContext,
   paths: WorkerPaths,
-  problem: string,
   propositionText: string,
   propositionStamp: FileStamp,
   round: number,
@@ -396,7 +395,6 @@ async function runVerificationRound(
         cwd: options.workspace,
         persona: loadRolePrompt(role),
         task: buildVerifierTask({
-          problem,
           propositionPath: paths.propositionRelative,
           propositionText,
           workflowIndex: round,
@@ -531,7 +529,6 @@ async function executeFixedWorkflow(
         options,
         context,
         paths,
-        inputs.problem,
         propositionText,
         propositionStamp,
         round,
@@ -556,7 +553,7 @@ async function executeFixedWorkflow(
         role: 'reviser',
         cwd: options.workspace,
         persona: loadRolePrompt('reviser'),
-        task: buildReviserTask(inputs.problem, paths.propositionRelative, finalFailure.review, round),
+        task: buildReviserTask(paths.propositionRelative, finalFailure.review, round),
         workflowRound: round,
         expectedPropositionStamp: propositionStamp,
       })

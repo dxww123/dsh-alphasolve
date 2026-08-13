@@ -76,7 +76,6 @@ describe("workflow task builders", () => {
 
   it("adds external-year triage only to the citation verifier task", () => {
     const base = {
-      problem: "Prove P.",
       propositionPath: "unverified_propositions/prop-a/proposition.md",
       propositionText: "We invoke a theorem (Example Author 1977).",
       workflowIndex: 1,
@@ -97,7 +96,7 @@ describe("workflow task builders", () => {
 
   it("builds judge, reviser, and theorem tasks without hidden conversation state", () => {
     expect(buildReviewVerdictTask("Verdict: pass", 2, 4)).toContain("# Attempt\n4")
-    const reviser = buildReviserTask("Problem", "prop.md", "Gap", 3)
+    const reviser = buildReviserTask("prop.md", "Gap", 3)
     expect(reviser).toContain("Revision after verifier workflow: 3")
     expect(reviser).not.toContain("# Problem")
     expect(reviser).not.toContain("Problem\n")

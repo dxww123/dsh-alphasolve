@@ -1,4 +1,4 @@
-import type { Context } from 'cordis';
+import type { Context } from '@deepseek-ai/cordis';
 import type { ToolExecution, ToolGuard } from '@deepseek-ai/dsh-tools';
 /** Agent roles which receive an AlphaSolve-scoped filesystem view. */
 export type RoleKind = 'orchestrator' | 'generator' | 'verifier' | 'verifier_citation' | 'reviser' | 'theorem_checker' | 'curator' | 'curator_helper' | 'compute' | 'numerical_experiment' | 'research_reviewer' | 'reasoning';

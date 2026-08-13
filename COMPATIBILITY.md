@@ -1,8 +1,9 @@
 # Compatibility
 
 The current implementation targets DSH snapshot
-`snapshots/20260806T160212Z-279244acb0` at
-`b3adbb736ae7dd3c7857eee5d97c82a3ac4ac96f` and AlphaSolve `main` commit
+`snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7` at
+`7b9644f2b664e46c9518506035aa6c8d5af4d8e8` (DSH package family
+`0.0.1-rc.2`) and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
 
@@ -11,13 +12,24 @@ The current implementation targets DSH snapshot
 - Primary acceptance platform: Linux.
 - Secondary design targets: macOS and Windows. Path validation understands both
   POSIX and Windows spellings even when running on the other platform.
-- DSH surfaces: the `headless` and `web` profiles, plus custom profiles into
-  which this package is explicitly installed.
+- DSH surfaces: the one-shot `headless` profile and long-lived `web` profile,
+  plus custom profiles into which this package is explicitly installed.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
-- DSH tool presentation: native is the acceptance baseline. In Code Mode the
-  reserved `run_code` transport can remain schema-visible, but the runtime's
-  scoped monotonic guard denies its execution.
+- DSH Agent presets: `standard`, `cordis`, and `code` are supported. The plugin
+  temporarily places its session in native tool presentation while active, so
+  `run_code` remains denied even for `code`, and restores the original
+  presentation when it unloads. `minimal`, or any custom preset without
+  `read`, `write`, `edit`, `glob`, and `grep`, is rejected before activation
+  with `agent_preset_missing_required_tools`; the plugin never widens the
+  preset implicitly.
+- A custom preset with a complete system prompt is rejected with
+  `agent_preset_blocks_alphasolve_prompt`; activation never continues without
+  an effective AlphaSolve orchestrator section.
+- DSH composition: role Agents join the main session's existing preset
+  generation, then receive AlphaSolve's scoped, role-specific restrictions.
+  Cordis and Schemastery dependencies use their `@deepseek-ai/*` package names,
+  and model routing uses the snapshot's `ModelSelection` service.
 - AlphaSolve semantics: ordinary orchestrator/worker flow from local
   `main@a336b850`; MCTS is intentionally out of scope.
 
@@ -30,9 +42,8 @@ not being the final answer. DSH-specific session isolation, durable wait
 delivery, problem digests, two-phase promotion, and atomic winner publication
 are retained as safety extensions.
 
-The external package depends on snapshot-specific DSH peer packages. Snapshot branches
-are independent roots, not a mergeable release train. A DSH update that changes
-Agent lifecycle events, scoped ToolRegistry behavior, Session events,
-role-Agent construction, profile composition, or bundle discovery must rebuild
-DSH first and then run this repository's full tests and a real profile
-composition probe before updating this compatibility pin.
+The package depends on snapshot-specific DSH peer packages. A DSH update that
+changes Agent lifecycle events, Agent preset composition, scoped ToolRuntime
+behavior, Session events, model selection, role-Agent construction, profile
+composition, or bundle discovery requires this repository's full tests plus
+real Web and Headless profile probes before updating this compatibility pin.

@@ -47,7 +47,7 @@ export declare class RuntimeStore {
      *
      * A solution is terminal only when both the unique durable winner
      * completion and the atomically-published complete solution are present.
-     * A claim (including the legacy state=solved-before-completion window) with
+     * A claim (including the earlier state=solved-before-completion window) with
      * no winner completion is provisional and is cleared so a fresh worker can
      * win. Conversely, a completion written just before a state update repairs
      * state to solved. A winner completion whose solution disappeared is

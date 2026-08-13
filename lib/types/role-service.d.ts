@@ -80,8 +80,8 @@ export declare class AlphaSolveRoleService implements RoleInvoker {
     private readonly runner;
     private readonly workerArtifactPaths;
     constructor(options: AlphaSolveRoleServiceOptions);
-    private inheritedTarget;
-    private target;
+    private inheritedModelSelection;
+    private modelSelection;
     private runWithTrace;
     private recordTrace;
     /** Durable trace paths accumulated for one worker, including helper traces. */

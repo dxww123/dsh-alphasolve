@@ -5,7 +5,7 @@ import {
   parseModelConfig,
   parseModelConfigJson,
   resolveAlphaSolveConfig,
-  resolveRoleLlmTarget,
+  resolveRoleModelSelection,
 } from '../src/model-config.js'
 
 describe('parseModelConfig', () => {
@@ -80,14 +80,14 @@ describe('configuration precedence', () => {
   })
 })
 
-describe('resolveRoleLlmTarget', () => {
+describe('resolveRoleModelSelection', () => {
   it('inherits missing fields and brands the explicit reasoning effort', () => {
     const inherited = {
       provider: 'parent-route',
       model: 'parent-model',
       reasoningEffort: 'medium' as never,
     }
-    expect(resolveRoleLlmTarget('generator', inherited, {
+    expect(resolveRoleModelSelection('generator', inherited, {
       generator: { model: 'proof-model', reasoningEffort: 'max' },
     })).toEqual({
       provider: 'parent-route',
@@ -97,7 +97,7 @@ describe('resolveRoleLlmTarget', () => {
   })
 
   it('fails only when a newly-started role resolves to an unavailable route', () => {
-    expect(() => resolveRoleLlmTarget(
+    expect(() => resolveRoleModelSelection(
       'verifier',
       { provider: 'route', model: 'parent-model' },
       { verifier: { model: 'missing' } },

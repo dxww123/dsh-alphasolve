@@ -1,0 +1,7 @@
+- id: alphasolve-compat
+  name: ../plugins/alphasolve-compat.js
+  config:
+    marker: minimal
+    presentation: native
+    tools:
+      - read

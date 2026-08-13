@@ -80,8 +80,6 @@ export interface GeneratorTaskInput {
 }
 export declare function buildGeneratorTask(input: GeneratorTaskInput): string;
 export interface VerifierTaskInput {
-    /** Retained for source compatibility; verifier prompts deliberately never expose the original problem. */
-    problem: string;
     propositionPath: string;
     propositionText: string;
     workflowIndex: number;
@@ -91,7 +89,7 @@ export interface VerifierTaskInput {
 }
 export declare function buildVerifierTask(input: VerifierTaskInput): string;
 export declare function buildReviewVerdictTask(review: string, workflowIndex: number, attemptIndex: number): string;
-export declare function buildReviserTask(_problem: string, propositionPath: string, review: string, workflowIndex: number): string;
+export declare function buildReviserTask(propositionPath: string, review: string, workflowIndex: number): string;
 export declare function buildTheoremCheckerTask(problem: string, verifiedPropositionPath: string): string;
 export interface CuratorDigestInput {
     traceKind: string;

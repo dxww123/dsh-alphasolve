@@ -1,0 +1,12 @@
+- id: alphasolve-compat
+  name: ../plugins/alphasolve-compat.js
+  config:
+    marker: standard
+    presentation: code
+    tools:
+      - read
+      - write
+      - edit
+      - glob
+      - grep
+      - bash

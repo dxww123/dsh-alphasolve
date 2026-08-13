@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import {
-  installAgentLlmTarget,
+  installModelSelection,
   type Agent,
   type AgentHandle,
-  type AgentLlmTarget,
   type AgentOptions,
+  type ModelSelection,
 } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   SessionId,
@@ -80,10 +81,10 @@ export interface RunRoleAgentOptions {
   readonly signal: AbortSignal
   readonly permissionPolicy: RolePermissionPolicy
   /** Complete resolved route; omit only when reasoning-effort inheritance is irrelevant. */
-  readonly modelTarget?: AgentLlmTarget
+  readonly modelSelection?: ModelSelection
   readonly maxTokens?: number
-  /** Global tools retained by tools.restrict; scoped helpers are registered separately. */
-  readonly allowedGlobalTools?: readonly string[]
+  /** Inherited file tools retained by tools.restrict; role-local helpers remain visible. */
+  readonly allowedInheritedTools?: readonly string[]
   readonly setupHelpers?: RoleHelperSetup
   /** Propagate nested-role activity to an owning role's inactivity watchdog. */
   readonly onActivity?: RoleActivityReporter
@@ -92,16 +93,12 @@ export interface RunRoleAgentOptions {
   /** Technical bounds only; they do not impose a total worker wall-clock limit. */
   readonly createTimeoutMs?: number
   readonly inactivityTimeoutMs?: number
-  /** @deprecated Use inactivityTimeoutMs. Retained for local API compatibility. */
-  readonly idleTimeoutMs?: number
   readonly disposeTimeoutMs?: number
 }
 
 export const ROLE_CREATE_TIMEOUT_MS = 60_000
 /** Abort only after one hour without any observable role or nested-helper activity. */
 export const ROLE_INACTIVITY_TIMEOUT_MS = 60 * 60_000
-/** @deprecated Use ROLE_INACTIVITY_TIMEOUT_MS. */
-export const ROLE_IDLE_TIMEOUT_MS = ROLE_INACTIVITY_TIMEOUT_MS
 export const ROLE_DISPOSE_TIMEOUT_MS = 15_000
 
 export class RoleTechnicalTimeoutError extends Error {
@@ -113,7 +110,7 @@ export class RoleTechnicalTimeoutError extends Error {
   }
 }
 
-const STANDARD_ROLE_GLOBAL_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit', 'glob', 'grep'])
+const STANDARD_ROLE_FILE_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit', 'glob', 'grep'])
 
 function technicalTimeout(value: number | undefined, fallback: number, label: string): number {
   const result = value ?? fallback
@@ -193,12 +190,12 @@ function assertRunOptions(options: RunRoleAgentOptions): void {
   if (typeof options.prompt === 'string' && options.prompt.trim().length === 0) {
     throw new TypeError('role Agent prompt must not be empty')
   }
-  for (const name of options.allowedGlobalTools ?? []) {
-    if (!STANDARD_ROLE_GLOBAL_TOOLS.has(name)) {
-      throw new TypeError(`global tool "${name}" is not a standard AlphaSolve role filesystem tool`)
+  for (const name of options.allowedInheritedTools ?? []) {
+    if (!STANDARD_ROLE_FILE_TOOLS.has(name)) {
+      throw new TypeError(`inherited tool "${name}" is not a standard AlphaSolve role filesystem tool`)
     }
     if (!options.permissionPolicy.allowedTools.has(name)) {
-      throw new TypeError(`global tool "${name}" is not admitted by the ${options.role} permission policy`)
+      throw new TypeError(`inherited tool "${name}" is not admitted by the ${options.role} permission policy`)
     }
     if (isForbiddenRoleTool(name)) throw new TypeError(`global tool "${name}" is forbidden for role Agents`)
   }
@@ -206,8 +203,8 @@ function assertRunOptions(options: RunRoleAgentOptions): void {
 
 function childAgentOptions(options: RunRoleAgentOptions): AgentOptions {
   const inherited = options.parent.options
-  const provider = options.modelTarget?.provider ?? inherited.provider
-  const model = options.modelTarget?.model ?? inherited.model
+  const provider = options.modelSelection?.provider ?? inherited.provider
+  const model = options.modelSelection?.model ?? inherited.model
   const maxTokens = options.maxTokens ?? inherited.maxTokens
   return {
     ...(provider === undefined ? {} : { provider }),
@@ -325,9 +322,9 @@ function reportFailure(
   }
 }
 
-function deriveGlobalAllowlist(childCtx: Context, policy: RolePermissionPolicy): string[] {
-  return [...STANDARD_ROLE_GLOBAL_TOOLS]
-    .filter(name => policy.allowedTools.has(name) && childCtx.tools.get(name) !== undefined)
+function deriveInheritedAllowlist(childCtx: Context, child: Agent, policy: RolePermissionPolicy): string[] {
+  return [...STANDARD_ROLE_FILE_TOOLS]
+    .filter(name => policy.allowedTools.has(name) && childCtx.tools.get(name, child) !== undefined)
 }
 
 /**
@@ -338,11 +335,8 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   assertRunOptions(options)
 
   const createTimeoutMs = technicalTimeout(options.createTimeoutMs, ROLE_CREATE_TIMEOUT_MS, 'createTimeoutMs')
-  if (options.inactivityTimeoutMs !== undefined && options.idleTimeoutMs !== undefined) {
-    throw new TypeError('specify only inactivityTimeoutMs (idleTimeoutMs is its deprecated alias)')
-  }
   const inactivityTimeoutMs = technicalTimeout(
-    options.inactivityTimeoutMs ?? options.idleTimeoutMs,
+    options.inactivityTimeoutMs,
     ROLE_INACTIVITY_TIMEOUT_MS,
     'inactivityTimeoutMs',
   )
@@ -359,6 +353,8 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     refreshInactivity()
     options.onActivity?.()
   }
+  const presetService = options.parent.ctx.get('agentPresets')
+  const agentPreset = presetService?.composedPreset(options.parent.ctx)
 
   const creation = options.parent.ctx.agents.create({
     sessionId: childId,
@@ -367,6 +363,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       parentSession: options.parent.id,
       origin: 'subagent',
       delegationDepth: (options.parent.session.header.delegationDepth ?? 0) + 1,
+      ...(agentPreset === undefined ? {} : { agentPreset }),
     },
     agentOptions: childAgentOptions(options),
     signal: creationSignal,
@@ -374,24 +371,30 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       const child = childCtx.agent
       if (child === undefined) throw new Error('Agent factory did not associate the unpublished child context')
 
+      const joinedPreset = childCtx.get('agentPresets')?.composeFrom(childCtx, options.parent.ctx)
+      if (joinedPreset !== agentPreset) {
+        throw new Error('AlphaSolve role Agent did not join the parent Agent preset selected at creation')
+      }
+      childCtx.tools.presentAs('native')
+
       childCtx.systemPrompt.section({
         name: 'deployment:persona',
         order: 0,
         text: options.persona,
       })
 
-      if (options.modelTarget !== undefined) {
-        installAgentLlmTarget(childCtx, {
-          current: options.modelTarget,
+      if (options.modelSelection !== undefined) {
+        installModelSelection(childCtx, {
+          current: options.modelSelection,
           assembled: undefined,
         })
       }
 
       installRolePermissionBoundary(childCtx, options.permissionPolicy)
-      const allowedGlobals = options.allowedGlobalTools === undefined
-        ? deriveGlobalAllowlist(childCtx, options.permissionPolicy)
-        : [...options.allowedGlobalTools]
-      childCtx.tools.restrict({ allow: allowedGlobals })
+      const allowedInherited = options.allowedInheritedTools === undefined
+        ? deriveInheritedAllowlist(childCtx, child, options.permissionPolicy)
+        : [...options.allowedInheritedTools]
+      childCtx.tools.restrict({ allow: allowedInherited })
 
       // This agent-scoped session firehose covers message/chunk, durable step
       // boundaries, tool calls/results, retry records, and terminal turn

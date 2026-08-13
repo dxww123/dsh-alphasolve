@@ -567,9 +567,6 @@ export class DurableCurator {
   }
 }
 
-/** Backwards-friendly shorter name for runtime integration. */
-export { DurableCurator as Curator }
-
 /** Strict read-only recovery probe used before terminal-session teardown. */
 export async function hasRecoverableCuratorTasks(workspace: string): Promise<boolean> {
   const workspaceRoot = await canonicalWorkspace(workspace)

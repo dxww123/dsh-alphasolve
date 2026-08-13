@@ -3,8 +3,8 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { Context } from 'cordis'
-import type { Agent, AgentLlmTarget } from '@deepseek-ai/dsh-agent'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
   JsonSchemaNode,
   ToolDefinition,
@@ -23,7 +23,7 @@ import type {
   CuratorKnowledgeTools,
   ReferencePart,
 } from './curator-tools.js'
-import { resolveRoleLlmTarget } from './model-config.js'
+import { resolveRoleModelSelection } from './model-config.js'
 import {
   createRolePolicy,
   type RoleKind,
@@ -371,7 +371,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
     this.runner = options.runner ?? runRoleAgent
   }
 
-  private inheritedTarget(): AgentLlmTarget {
+  private inheritedModelSelection(): ModelSelection {
     const logged = this.parent.session.requestHeader()?.config
     const provider = logged?.provider ?? this.parent.options.provider
     const model = logged?.model ?? this.parent.options.model
@@ -386,10 +386,10 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
   }
 
-  private target(role: WorkflowRole | RoleKind): AgentLlmTarget {
-    return resolveRoleLlmTarget(
+  private modelSelection(role: WorkflowRole | RoleKind): ModelSelection {
+    return resolveRoleModelSelection(
       modelRole(role),
-      this.inheritedTarget(),
+      this.inheritedModelSelection(),
       this.getConfig().models,
     )
   }
@@ -542,7 +542,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
           maxTurns: ROLE_MAX_TURNS[request.type],
           signal: exec.signal,
           permissionPolicy: helperPolicy,
-          modelTarget: this.target(request.type),
+          modelSelection: this.modelSelection(request.type),
           onActivity: reportActivity,
           ...(calculator ? {
             setupHelpers: (helperCtx: Context): void => {
@@ -576,8 +576,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
       maxTurns: request.maxTurns,
       signal: request.signal,
       permissionPolicy: policy,
-      modelTarget: this.target(request.role),
-      ...(request.role === 'review_verdict_judge' ? { allowedGlobalTools: [] } : {}),
+      modelSelection: this.modelSelection(request.role),
+      ...(request.role === 'review_verdict_judge' ? { allowedInheritedTools: [] } : {}),
       ...(helperEnabled ? {
         setupHelpers: this.helperSetup(request.role, request.workerId, policy),
       } : {}),
@@ -614,8 +614,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
         workerDirectory,
         propositionFile,
       }),
-      modelTarget: this.target('generator'),
-      allowedGlobalTools: [],
+      modelSelection: this.modelSelection('generator'),
+      allowedInheritedTools: [],
     })
     return completed(result, 'proposition filename generator').text
   }
@@ -639,7 +639,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
       maxTurns: ROLE_MAX_TURNS.research_reviewer,
       signal: request.signal,
       permissionPolicy: policy,
-      modelTarget: this.target('research_reviewer'),
+      modelSelection: this.modelSelection('research_reviewer'),
       setupHelpers: (ctx): void => {
         for (const definition of definitions) ctx.tools.register(definition)
       },
@@ -691,8 +691,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
       maxTurns: ROLE_MAX_TURNS.curator,
       signal: context.signal,
       permissionPolicy: policy,
-      modelTarget: this.target('curator'),
-      allowedGlobalTools: [],
+      modelSelection: this.modelSelection('curator'),
+      allowedInheritedTools: [],
       setupHelpers: (ctx, child, reportActivity = () => undefined): void => {
         for (const tool of createCuratorTools(context.tools)) ctx.tools.register(tool)
         if (admitted.length > 0) {

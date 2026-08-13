@@ -79,8 +79,6 @@ export declare class DurableCurator {
     }): Promise<CuratorStopResult>;
     private stopOnce;
 }
-/** Backwards-friendly shorter name for runtime integration. */
-export { DurableCurator as Curator };
 /** Strict read-only recovery probe used before terminal-session teardown. */
 export declare function hasRecoverableCuratorTasks(workspace: string): Promise<boolean>;
 //# sourceMappingURL=curator.d.ts.map

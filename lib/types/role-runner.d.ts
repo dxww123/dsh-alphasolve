@@ -1,5 +1,5 @@
-import type { Context } from 'cordis';
-import { type Agent, type AgentLlmTarget } from '@deepseek-ai/dsh-agent';
+import type { Context } from '@deepseek-ai/cordis';
+import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
 import { type ContentBlock } from '@deepseek-ai/dsh-llm';
 import { SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session';
 import { type RoleKind, type RolePermissionPolicy } from './permissions.js';
@@ -44,10 +44,10 @@ export interface RunRoleAgentOptions {
     readonly signal: AbortSignal;
     readonly permissionPolicy: RolePermissionPolicy;
     /** Complete resolved route; omit only when reasoning-effort inheritance is irrelevant. */
-    readonly modelTarget?: AgentLlmTarget;
+    readonly modelSelection?: ModelSelection;
     readonly maxTokens?: number;
-    /** Global tools retained by tools.restrict; scoped helpers are registered separately. */
-    readonly allowedGlobalTools?: readonly string[];
+    /** Inherited file tools retained by tools.restrict; role-local helpers remain visible. */
+    readonly allowedInheritedTools?: readonly string[];
     readonly setupHelpers?: RoleHelperSetup;
     /** Propagate nested-role activity to an owning role's inactivity watchdog. */
     readonly onActivity?: RoleActivityReporter;
@@ -56,15 +56,11 @@ export interface RunRoleAgentOptions {
     /** Technical bounds only; they do not impose a total worker wall-clock limit. */
     readonly createTimeoutMs?: number;
     readonly inactivityTimeoutMs?: number;
-    /** @deprecated Use inactivityTimeoutMs. Retained for local API compatibility. */
-    readonly idleTimeoutMs?: number;
     readonly disposeTimeoutMs?: number;
 }
 export declare const ROLE_CREATE_TIMEOUT_MS = 60000;
 /** Abort only after one hour without any observable role or nested-helper activity. */
 export declare const ROLE_INACTIVITY_TIMEOUT_MS: number;
-/** @deprecated Use ROLE_INACTIVITY_TIMEOUT_MS. */
-export declare const ROLE_IDLE_TIMEOUT_MS: number;
 export declare const ROLE_DISPOSE_TIMEOUT_MS = 15000;
 export declare class RoleTechnicalTimeoutError extends Error {
     readonly phase: 'create' | 'inactivity' | 'dispose';

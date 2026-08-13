@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { Context } from 'cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -16,10 +16,11 @@ import {
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 
 import { ORCHESTRATOR_INDEX_PATH_PATTERN } from '../src/permissions.js'
 import { PROJECT_TOOL_NAMES } from '../src/project-tools.js'
+import { acquireWorkspaceLock } from '../src/lock.js'
 import { RuntimeStore } from '../src/store.js'
 import { STATE_VERSION } from '../src/types.js'
 import {
@@ -126,6 +127,14 @@ async function harness(
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  for (const name of ['read', 'glob', 'grep']) {
+    ctx.tools.register(defineContentToolFixture({
+      name,
+      description: `Stub ${name} tool`,
+      parameters: {},
+      execute: () => Promise.resolve([{ type: 'text', text: name }]),
+    }))
+  }
   ctx.tools.register(stubFileTool('write'))
   ctx.tools.register(stubFileTool('edit'))
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -256,6 +265,34 @@ async function until(predicate: () => boolean): Promise<void> {
 }
 
 describe('runtime tool contract', () => {
+  it('notifies the controller even when workspace-lock release fails', async () => {
+    const { runtime, disposed } = await harness()
+    const internals = runtime as unknown as {
+      lock: { release(): Promise<void> }
+      shutdown(kind: 'interrupted', releaseLock?: boolean): Promise<void>
+    }
+    vi.spyOn(internals.lock, 'release').mockRejectedValueOnce(new Error('injected lock release failure'))
+
+    await expect(internals.shutdown('interrupted')).rejects.toThrow('injected lock release failure')
+    expect(disposed).toHaveBeenCalledTimes(1)
+
+    await runtime.dispose()
+    expect(disposed).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the workspace lock on dispose even when the stop shutdown failed', async () => {
+    const { ctx, agent, runtime, root, disposed } = await harness()
+    vi.spyOn(runtime.manager, 'stop').mockRejectedValueOnce(new Error('injected shutdown failure'))
+
+    const stopped = await execute(ctx, agent, RUNTIME_TOOL_NAMES.stop, {}, 'stop-shutdown-failure')
+    expect(stopped).toMatchObject({ isError: true })
+    await expect(runtime.dispose()).resolves.toBeUndefined()
+    expect(disposed).toHaveBeenCalledTimes(1)
+
+    const replacement = await acquireWorkspaceLock(root, 'replacement-session')
+    await replacement.release()
+  })
+
   it('injects one orchestrator-visible notice when a curator task fails', async () => {
     const { agent, runtime } = await harness()
     const inject = vi.spyOn(agent, 'inject')

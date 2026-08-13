@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  Curator,
+  DurableCurator,
   hasRecoverableCuratorTasks,
   type CuratorRunnerContext,
 } from '../src/curator.js'
@@ -36,7 +36,7 @@ describe('durable curator queue', () => {
     const started: string[] = []
     let running = 0
     let maximumRunning = 0
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       idFactory: sequentialIds(),
       runner: async ({ task }) => {
@@ -75,7 +75,7 @@ describe('durable curator queue', () => {
     await writeFile(path.join(root, '.alphasolve', 'traces', 'a.json'), '{}\n')
     const seen: string[] = []
     const surfaced: string[] = []
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       onTaskFailure: (task, error) => surfaced.push(`${task.id}:${String(error)}`),
       runner: async ({ task }) => {
@@ -123,7 +123,7 @@ describe('durable curator queue', () => {
     ]
     await writeFile(queuePath, `${JSON.stringify({ version: STATE_VERSION, tasks })}\n`)
     const seen: string[] = []
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ task }) => { seen.push(task.id) },
     })
@@ -156,7 +156,7 @@ describe('durable curator queue', () => {
     }
     await writeFile(queuePath, `${JSON.stringify({ version: STATE_VERSION, tasks: [active] })}\n`)
 
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ tools }) => {
         await tools.write('knowledge/recovered.md', '# Recovered\n')
@@ -213,7 +213,7 @@ describe('durable curator queue', () => {
       attempts: 1,
     }
     await writeFile(queuePath, `${JSON.stringify({ version: STATE_VERSION, tasks: [active] })}\n`)
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ tools }) => {
         await tools.write('knowledge/finalized.md', '# Finalized\n')
@@ -234,7 +234,7 @@ describe('durable curator queue', () => {
       path.join(rootWithRootExtra, '.alphasolve', 'curator', 'queue.json'),
       `${JSON.stringify({ version: STATE_VERSION, tasks: [], unexpected: true })}\n`,
     )
-    await expect(Curator.open({ workspaceRoot: rootWithRootExtra, runner: async () => undefined }))
+    await expect(DurableCurator.open({ workspaceRoot: rootWithRootExtra, runner: async () => undefined }))
       .rejects.toThrow(/queue file/)
 
     const rootWithTaskExtra = await workspace()
@@ -253,7 +253,7 @@ describe('durable curator queue', () => {
         }],
       })}\n`,
     )
-    await expect(Curator.open({ workspaceRoot: rootWithTaskExtra, runner: async () => undefined }))
+    await expect(DurableCurator.open({ workspaceRoot: rootWithTaskExtra, runner: async () => undefined }))
       .rejects.toThrow(/exact-schema/)
 
     const rootWithBadTrace = await workspace()
@@ -272,11 +272,11 @@ describe('durable curator queue', () => {
         }],
       })}\n`,
     )
-    await expect(Curator.open({ workspaceRoot: rootWithBadTrace, runner: async () => undefined }))
+    await expect(DurableCurator.open({ workspaceRoot: rootWithBadTrace, runner: async () => undefined }))
       .rejects.toThrow(/invalid curator trace path/)
 
     const root = await workspace()
-    const curator = await Curator.open({ workspaceRoot: root, runner: async () => undefined })
+    const curator = await DurableCurator.open({ workspaceRoot: root, runner: async () => undefined })
     await expect(curator.submit({ kind: 'digest', tracePath: 'problem.md' })).rejects.toThrow(/canonical JSON/)
     await expect(curator.submit({ kind: 'digest', tracePath: '.alphasolve/traces/nested/a.json' }))
       .rejects.toThrow(/canonical JSON/)
@@ -291,7 +291,7 @@ describe('durable curator queue', () => {
     await symlink(path.join(root, 'problem.md'), path.join(root, '.alphasolve', 'traces', 'alias.json'))
     await writeFile(path.join(root, '.alphasolve', 'traces', 'invalid.json'), 'not json\n')
     const seen: string[] = []
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ task }) => { seen.push(task.id) },
     })
@@ -313,7 +313,7 @@ describe('durable curator queue', () => {
       path.join(root, '.alphasolve', 'traces'),
       'dir',
     )
-    const aliasedDirectory = await Curator.open({
+    const aliasedDirectory = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ task }) => { seen.push(task.id) },
     })
@@ -361,7 +361,7 @@ describe('durable curator queue', () => {
     const root = await workspace()
     let started: (() => void) | undefined
     const active = new Promise<void>(resolve => { started = resolve })
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       drainTimeoutMs: 10,
       runner: ({ signal }: CuratorRunnerContext) => new Promise<void>((_resolve, reject) => {
@@ -390,7 +390,7 @@ describe('durable curator queue', () => {
   it('lets shutdown drain queued work before returning when the runner completes in time', async () => {
     const root = await workspace()
     const seen: string[] = []
-    const curator = await Curator.open({
+    const curator = await DurableCurator.open({
       workspaceRoot: root,
       runner: async ({ task }) => { seen.push(task.id) },
     })

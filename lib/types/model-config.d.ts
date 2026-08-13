@@ -1,4 +1,4 @@
-import type { AgentLlmTarget } from '@deepseek-ai/dsh-agent';
+import type { ModelSelection } from '@deepseek-ai/dsh-agent';
 import { type AlphaSolveConfig, type AlphaSolveFileConfig, type ModelOverride, type ModelRole } from './types.js';
 export { MODEL_ROLES } from './types.js';
 export type { AlphaSolveConfig, AlphaSolveFileConfig, ModelOverride, ModelRole } from './types.js';
@@ -22,8 +22,8 @@ export interface ResolveConfigOptions {
 export declare function resolveAlphaSolveConfig(options?: ResolveConfigOptions): AlphaSolveConfig;
 export type ModelAvailabilityCheck = (provider: string, model: string) => boolean;
 /**
- * Resolve a complete immutable target for a newly-created role Agent.
+ * Resolve a complete immutable model selection for a newly-created role Agent.
  * Existing Agents retain the previously resolved object when configuration changes.
  */
-export declare function resolveRoleLlmTarget(role: ModelRole, inherited: AgentLlmTarget, overrides?: Readonly<Partial<Record<ModelRole, ModelOverride>>>, isAvailable?: ModelAvailabilityCheck): AgentLlmTarget;
+export declare function resolveRoleModelSelection(role: ModelRole, inherited: ModelSelection, overrides?: Readonly<Partial<Record<ModelRole, ModelOverride>>>, isAvailable?: ModelAvailabilityCheck): ModelSelection;
 //# sourceMappingURL=model-config.d.ts.map

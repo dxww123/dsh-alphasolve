@@ -1,4 +1,4 @@
-import { Context, type Fiber } from 'cordis'
+import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -11,6 +11,10 @@ import {
 import {
   CallId,
   createUserMessage,
+  LlmAdapter,
+  type GenerateOptions,
+  type LlmResolvedModelInfo,
+  type StreamChunk,
   type UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -29,9 +33,26 @@ import {
   RUNTIME_TOOL_NAMES,
   type AlphaSolveRuntime,
   type RuntimeActivationResult,
+  type RuntimeRestoreResult,
 } from '../src/runtime.js'
 
 const contexts: Context[] = []
+
+class CapturingAdapter extends LlmAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({ provider, id: model, name: model })
+  }
+
+  override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: 'continued' } }
+    yield { type: 'usage', usage: { inputTokens: 2, outputTokens: 1 } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
 
 afterEach(async () => {
   await Promise.allSettled(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
@@ -58,6 +79,17 @@ async function createAgent(ctx: Context, id: string): Promise<Agent> {
     agentOptions: { provider: 'unused', model: 'unused' },
   })
   return handle.agent
+}
+
+function registerRequiredFileTools(ctx: Context): void {
+  for (const name of ['read', 'write', 'edit', 'glob', 'grep']) {
+    ctx.tools.register(defineContentToolFixture({
+      name,
+      description: `${name} capability fixture`,
+      parameters: {},
+      execute: () => Promise.resolve([{ type: 'text', text: name }]),
+    }))
+  }
 }
 
 async function submit(ctx: Context, agent: Agent, input: UserMessage): Promise<void> {
@@ -163,6 +195,7 @@ describe('session-scoped preflight lifecycle', () => {
 
   it('publishes preflight and activated tools only in the triggering agent scope', async () => {
     const ctx = await harness()
+    registerRequiredFileTools(ctx)
     const first = await createAgent(ctx, 'controller-first')
     const second = await createAgent(ctx, 'controller-second')
     let runtimeFiber: Fiber | undefined
@@ -237,6 +270,7 @@ describe('session-scoped preflight lifecycle', () => {
 
   it('cannot authorize an overwrite before the authoritative confirmation round trip', async () => {
     const ctx = await harness()
+    registerRequiredFileTools(ctx)
     const agent = await createAgent(ctx, 'controller-no-first-turn-overwrite')
     const activate = vi.fn()
     new AlphaSolveController(ctx, { activate }).install()
@@ -258,6 +292,7 @@ describe('session-scoped preflight lifecycle', () => {
 
   it('retains confirmation preflight for exactly the next direct user response', async () => {
     const ctx = await harness()
+    registerRequiredFileTools(ctx)
     const agent = await createAgent(ctx, 'controller-confirmation')
     const activate = vi.fn(async (): Promise<RuntimeActivationResult> => ({
       activated: false,
@@ -323,5 +358,116 @@ describe('session-scoped preflight lifecycle', () => {
     settled(ctx, agent, 1)
     await until(() => ctx.tools.get(ACTIVATE_TOOL_NAME, agent) === undefined)
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
+  })
+})
+
+describe('same-session cold resume lifecycle', () => {
+  it('holds the first followup in maintenance until runtime tools are mounted', async () => {
+    const ctx = await harness()
+    const adapter = new CapturingAdapter()
+    ctx.llm.registerAdapter(['unused'], adapter)
+    const gate = Promise.withResolvers<void>()
+    let runtimeFiber: Fiber | undefined
+    const runtimeDispose = vi.fn(async () => runtimeFiber?.dispose())
+    const restore = vi.fn(async (agent: Agent): Promise<RuntimeRestoreResult> => {
+      await gate.promise
+      runtimeFiber = agent.ctx.plugin((inner: Context) => {
+        inner.tools.register(defineContentToolFixture({
+          name: RUNTIME_TOOL_NAMES.worker,
+          description: 'restored worker',
+          parameters: {},
+          execute: () => Promise.resolve([{ type: 'text', text: 'worker' }]),
+        }))
+      })
+      await runtimeFiber
+      return {
+        restored: true,
+        workspace: '/test/workspace',
+        capacity: 3,
+        runtime: { dispose: runtimeDispose } as unknown as AlphaSolveRuntime,
+      }
+    })
+    new AlphaSolveController(ctx, { restore }).install()
+    const agent = await createAgent(ctx, 'controller-cold-resume')
+    let claimed = 0
+    ctx.on('agent/inbox/claimed', ({ agent: subject }) => {
+      if (subject === agent) claimed += 1
+    })
+
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    agent.followup(message('继续'))
+    await Promise.resolve()
+
+    expect(restore).toHaveBeenCalledTimes(1)
+    expect(claimed).toBe(0)
+    expect(agent.inbox.nextTurn).toHaveLength(1)
+    expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
+
+    gate.resolve()
+    await agent.whenIdle()
+
+    expect(claimed).toBe(1)
+    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain(RUNTIME_TOOL_NAMES.worker)
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+    expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeDefined()
+  })
+
+  it('silently returns to keyword-gated dormancy when no durable intent exists', async () => {
+    const ctx = await harness()
+    const restore = vi.fn(async (): Promise<RuntimeRestoreResult> => ({
+      restored: false,
+      workspace: '/test/workspace',
+    }))
+    new AlphaSolveController(ctx, { restore }).install()
+    const agent = await createAgent(ctx, 'controller-resume-dormant')
+
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agent.whenIdle()
+    expect(agent.inbox.nextStep).toHaveLength(0)
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
+  })
+
+  it('injects one diagnostic when an eligible resumed runtime cannot be restored', async () => {
+    const ctx = await harness()
+    const restore = vi.fn(async (): Promise<RuntimeRestoreResult> => ({
+      restored: false,
+      workspace: '/test/workspace',
+      reason: 'problem.md changed during recovery',
+    }))
+    new AlphaSolveController(ctx, { restore }).install()
+    const agent = await createAgent(ctx, 'controller-resume-failure')
+
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agent.whenIdle()
+
+    expect(agent.inbox.nextStep).toHaveLength(1)
+    expect(JSON.stringify(agent.inbox.nextStep[0])).toContain('could not restore')
+    expect(JSON.stringify(agent.inbox.nextStep[0])).toContain('problem.md changed')
+  })
+
+  it('injects one cold-resume diagnostic naming every missing preset file tool', async () => {
+    const ctx = await harness()
+    const restore = vi.fn(async () => ({
+      restored: false as const,
+      workspace: '/test/workspace',
+      reason: 'agent_preset_missing_required_tools',
+      agentPreset: 'minimal',
+      missingTools: ['write', 'edit', 'glob', 'grep'],
+    }))
+    new AlphaSolveController(ctx, { restore }).install()
+    const agent = await createAgent(ctx, 'controller-resume-missing-tools')
+    const inject = vi.spyOn(agent, 'inject')
+
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agent.whenIdle()
+
+    expect(inject).toHaveBeenCalledTimes(1)
+    const diagnostic = JSON.stringify(inject.mock.calls[0]?.[0])
+    expect(diagnostic).toContain('minimal')
+    for (const name of ['write', 'edit', 'glob', 'grep']) expect(diagnostic, name).toContain(name)
   })
 })

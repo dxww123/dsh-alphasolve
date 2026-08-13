@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../deepseek-harness/vendor/cordis
+        version: link:../deepseek-harness/vendor/cordis
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: link:../deepseek-harness/vendor/loader
+        version: link:../deepseek-harness/vendor/loader
       '@deepseek-ai/dsh-agent':
         specifier: link:../deepseek-harness/packages/core/agent
         version: link:../deepseek-harness/packages/core/agent
@@ -15,11 +21,17 @@ importers:
         specifier: link:../deepseek-harness/packages/core/agent-loop
         version: link:../deepseek-harness/packages/core/agent-loop
       '@deepseek-ai/dsh-agent-loop-testkit':
-        specifier: link:../deepseek-harness/packages/support/agent-loop-testkit
-        version: link:../deepseek-harness/packages/support/agent-loop-testkit
+        specifier: link:../deepseek-harness/packages/test-support/agent-loop-testkit
+        version: link:../deepseek-harness/packages/test-support/agent-loop-testkit
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: link:../deepseek-harness/packages/preset/agent-presets
+        version: link:../deepseek-harness/packages/preset/agent-presets
       '@deepseek-ai/dsh-atomic-write':
         specifier: link:../deepseek-harness/packages/util/atomic-write
         version: link:../deepseek-harness/packages/util/atomic-write
+      '@deepseek-ai/dsh-code-runtime':
+        specifier: link:../deepseek-harness/packages/code-runtime/code-runtime
+        version: link:../deepseek-harness/packages/code-runtime/code-runtime
       '@deepseek-ai/dsh-llm':
         specifier: link:../deepseek-harness/packages/llm/llm
         version: link:../deepseek-harness/packages/llm/llm
@@ -38,15 +50,12 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: link:../deepseek-harness/packages/core/tools
         version: link:../deepseek-harness/packages/core/tools
+      '@deepseek-ai/schemastery':
+        specifier: link:../deepseek-harness/vendor/schemastery
+        version: link:../deepseek-harness/vendor/schemastery
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
-      cordis:
-        specifier: link:../deepseek-harness/vendor/cordis
-        version: link:../deepseek-harness/vendor/cordis
-      schemastery:
-        specifier: link:../deepseek-harness/vendor/schemastery
-        version: link:../deepseek-harness/vendor/schemastery
       tsdown:
         specifier: ^0.22.2
         version: 0.22.14(typescript@6.0.3)

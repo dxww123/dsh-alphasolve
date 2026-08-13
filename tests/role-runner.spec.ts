@@ -24,7 +24,7 @@ function options(parent: Agent) {
     signal: new AbortController().signal,
     permissionPolicy: createRolePolicy('reasoning', { workspace: cwd }),
     createTimeoutMs: 5,
-    idleTimeoutMs: 5,
+    inactivityTimeoutMs: 5,
     disposeTimeoutMs: 5,
   }
 }
@@ -40,7 +40,7 @@ describe('role Agent technical timeouts', () => {
       id: SessionId('parent-create-timeout'),
       options: {},
       session: { header: {} },
-      ctx: { agents: { create } },
+      ctx: { agents: { create }, get: vi.fn(() => undefined) },
     } as unknown as Agent
 
     await expect(runRoleAgent(options(parent))).rejects.toMatchObject({
@@ -66,7 +66,7 @@ describe('role Agent technical timeouts', () => {
       id: SessionId('parent-idle-timeout'),
       options: {},
       session: { header: {} },
-      ctx: { agents: { create } },
+      ctx: { agents: { create }, get: vi.fn(() => undefined) },
     } as unknown as Agent
 
     await expect(runRoleAgent({
@@ -124,7 +124,10 @@ describe('role Agent technical timeouts', () => {
       id: SessionId('parent-retried-role'),
       options: {},
       session: { header: {} },
-      ctx: { agents: { create: vi.fn(() => Promise.resolve({ agent: child, dispose })) } },
+      ctx: {
+        agents: { create: vi.fn(() => Promise.resolve({ agent: child, dispose })) },
+        get: vi.fn(() => undefined),
+      },
     } as unknown as Agent
 
     await expect(runRoleAgent(options(parent))).resolves.toMatchObject({
@@ -157,9 +160,11 @@ describe('role Agent technical timeouts', () => {
       } as unknown as Agent
       const childCtx = {
         agent: child,
+        get: vi.fn(() => undefined),
         systemPrompt: { section: vi.fn() },
         tools: {
           get: vi.fn(() => undefined),
+          presentAs: vi.fn(() => vi.fn()),
           restrict: vi.fn(),
           guard: vi.fn(() => vi.fn()),
         },
@@ -178,14 +183,13 @@ describe('role Agent technical timeouts', () => {
         id: SessionId('parent-active-role'),
         options: {},
         session: { header: {} },
-        ctx: { agents: { create } },
+        ctx: { agents: { create }, get: vi.fn(() => undefined) },
       } as unknown as Agent
 
       const run = runRoleAgent({
         ...options(parent),
         createTimeoutMs: 100,
         inactivityTimeoutMs: 25,
-        idleTimeoutMs: undefined,
         disposeTimeoutMs: 100,
         setupHelpers: (_ctx, _child, reportActivity) => { nestedActivity = reportActivity },
       })
@@ -244,9 +248,11 @@ describe('role Agent technical timeouts', () => {
     } as unknown as Agent
     const childCtx = {
       agent: child,
+      get: vi.fn(() => undefined),
       systemPrompt: { section: vi.fn() },
       tools: {
         get: vi.fn(() => undefined),
+        presentAs: vi.fn(() => vi.fn()),
         restrict: vi.fn(),
         guard: vi.fn(() => vi.fn()),
       },
@@ -268,6 +274,7 @@ describe('role Agent technical timeouts', () => {
             return { agent: child, dispose }
           }),
         },
+        get: vi.fn(() => undefined),
       },
     } as unknown as Agent
 
@@ -275,7 +282,6 @@ describe('role Agent technical timeouts', () => {
       ...options(parent),
       createTimeoutMs: 100,
       inactivityTimeoutMs: 1_000,
-      idleTimeoutMs: undefined,
       disposeTimeoutMs: 100,
     })
     await Promise.resolve()
