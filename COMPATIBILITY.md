@@ -28,8 +28,10 @@ The current implementation targets DSH snapshot
   an effective AlphaSolve orchestrator section.
 - DSH composition: role Agents join the main session's existing preset
   generation, then receive AlphaSolve's scoped, role-specific restrictions.
-  Cordis and Schemastery dependencies use their `@deepseek-ai/*` package names,
-  and model routing uses the snapshot's `ModelSelection` service.
+  Cordis and DSH Service Definition packages remain host-provided peers;
+  Schemastery is an ordinary package-owned runtime validator. All use their
+  `@deepseek-ai/*` package names, and model routing uses the snapshot's
+  `ModelSelection` service.
 - AlphaSolve semantics: ordinary orchestrator/worker flow from local
   `main@a336b850`; MCTS is intentionally out of scope.
 
@@ -47,3 +49,7 @@ changes Agent lifecycle events, Agent preset composition, scoped ToolRuntime
 behavior, Session events, model selection, role-Agent construction, profile
 composition, or bundle discovery requires this repository's full tests plus
 real Web and Headless profile probes before updating this compatibility pin.
+`pnpm test:packed` additionally installs the built tarball with automatic peer
+installation disabled, resolves its package-owned runtime dependencies from the
+isolated consumer, and activates it through the real Cordis Loader; a config
+dump alone is not a production-loader acceptance test.

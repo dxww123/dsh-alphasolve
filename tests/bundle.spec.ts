@@ -8,6 +8,9 @@ interface PackageManifest {
   main?: string
   exports?: Record<string, unknown>
   files?: string[]
+  dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
   dsh?: { bundle?: { patch?: string } }
 }
 
@@ -15,6 +18,12 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')) as PackageManifest
 
 describe('DSH profile bundle', () => {
+  it('owns Schemastery as an exact runtime dependency', () => {
+    expect(manifest.dependencies?.['@deepseek-ai/schemastery']).toBe('3.18.1-rc.1')
+    expect(manifest.peerDependencies).not.toHaveProperty('@deepseek-ai/schemastery')
+    expect(manifest.devDependencies).not.toHaveProperty('@deepseek-ai/schemastery')
+  })
+
   it('publishes an in-package patch through the bundle manifest', () => {
     const patch = manifest.dsh?.bundle?.patch
     expect(patch).toBe('./cordis.patch.yml')

@@ -1,12 +1,16 @@
 lockfileVersion: '9.0'
 
 settings:
-  autoInstallPeers: true
+  autoInstallPeers: false
   excludeLinksFromLockfile: false
 
 importers:
 
   .:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.1-rc.1
+        version: 3.18.1-rc.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: link:../deepseek-harness/vendor/cordis
@@ -50,9 +54,6 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: link:../deepseek-harness/packages/core/tools
         version: link:../deepseek-harness/packages/core/tools
-      '@deepseek-ai/schemastery':
-        specifier: link:../deepseek-harness/vendor/schemastery
-        version: link:../deepseek-harness/vendor/schemastery
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
@@ -64,9 +65,15 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.10(@types/node@22.20.1)(vite@8.2.0(@types/node@22.20.1))
+        version: 4.1.10(@types/node@22.20.1)
 
 packages:
+
+  '@deepseek-ai/cosmokit@1.8.2-rc.1':
+    resolution: {integrity: sha512-4GQw84Y80yipE1dmLO20WVAVIdC3s1SfHwsO39iYcEkP8rN4FOJK4cxo0RENYVsdWhNEkRIze+ynAJY/EW1Ukg==}
+
+  '@deepseek-ai/schemastery@3.18.1-rc.1':
+    resolution: {integrity: sha512-gilia4mY6S/j6oFYsn4x2Ve9K6QfvzTgqJntkty0wFsKjTYHQ6e2WDvXLMw48t75WRBhpLt+ZpFm3GHmTWkNMw==}
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
@@ -693,7 +700,6 @@ packages:
       '@vitest/ui': 4.1.10
       happy-dom: '*'
       jsdom: '*'
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -733,6 +739,13 @@ packages:
     resolution: {integrity: sha512-KPQcpF9aj77ywlJBIkQWCQ9DObdxnCA8AJdUOmA5CZZx042Xt4+dvbQmPJfWxF3E+KG5dVAZ2fBKuDJ8VsKWgA==}
 
 snapshots:
+
+  '@deepseek-ai/cosmokit@1.8.2-rc.1': {}
+
+  '@deepseek-ai/schemastery@3.18.1-rc.1':
+    dependencies:
+      '@deepseek-ai/cosmokit': 1.8.2-rc.1
+      '@standard-schema/spec': 1.1.0
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
@@ -1132,7 +1145,7 @@ snapshots:
       '@types/node': 22.20.1
       fsevents: 2.3.3
 
-  vitest@4.1.10(@types/node@22.20.1)(vite@8.2.0(@types/node@22.20.1)):
+  vitest@4.1.10(@types/node@22.20.1):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.2.0(@types/node@22.20.1))
@@ -1157,7 +1170,18 @@ snapshots:
     optionalDependencies:
       '@types/node': 22.20.1
     transitivePeerDependencies:
+      - '@vitejs/devtools'
+      - esbuild
+      - jiti
+      - less
       - msw
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - terser
+      - tsx
+      - yaml
 
   why-is-node-running@2.3.0:
     dependencies:
