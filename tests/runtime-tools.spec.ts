@@ -8,7 +8,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
-  CallId,
+  ToolCallId,
   createUserMessage,
   LlmAdapter,
   type GenerateOptions,
@@ -17,6 +17,8 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+
+import { alphaSolveSessionProjection } from '../src/session-state.js'
 
 import { ORCHESTRATOR_INDEX_PATH_PATTERN } from '../src/permissions.js'
 import { PROJECT_TOOL_NAMES } from '../src/project-tools.js'
@@ -67,7 +69,7 @@ describe('curator trace routing', () => {
 })
 
 function toolCallResponse(id: string, name: string, args: object): StreamChunk[] {
-  const callId = CallId(id)
+  const callId = ToolCallId(id)
   const argumentsJson = JSON.stringify(args)
   return [
     { type: 'block-start', index: 0, blockType: 'tool-call' },
@@ -127,6 +129,7 @@ async function harness(
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  ctx.sessionProjections.register(alphaSolveSessionProjection)
   for (const name of ['read', 'glob', 'grep']) {
     ctx.tools.register(defineContentToolFixture({
       name,
@@ -240,7 +243,7 @@ async function execute(
 ) {
   return ctx.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId(callId),
+    callId: ToolCallId(callId),
     name,
     arguments: args,
     agent,
@@ -318,8 +321,9 @@ describe('runtime tool contract', () => {
     ))
     expect(matching).toHaveLength(1)
     expect(JSON.stringify(matching[0]?.[0])).toContain('kind=digest')
-    expect(JSON.stringify(matching[0]?.[0])).toContain('source')
-    expect(JSON.stringify(matching[0]?.[0])).toContain('dsh-alphasolve')
+    expect(matching[0]?.[0].source).toEqual({
+      kind: 'alphasolve', form: 'notice', summary: 'AlphaSolve curator task failed',
+    })
   })
 
   it('assembles live capacity and worker state instead of a stale static snapshot', async () => {
@@ -563,6 +567,8 @@ describe('terminal crash recovery', () => {
     const { ctx, agent, runtime, root, disposed, resumed } = await harness([
       toolCallResponse(waitCallId, RUNTIME_TOOL_NAMES.wait, {}),
     ], root => seedCompletionBeforeSolvedState(root, { delivered: true, curatorPending: true }))
+    const events: SessionEvent[] = []
+    agent.ctx.on('session/event', (_session, event) => { events.push(event) })
 
     expect(resumed).toBe(true)
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
@@ -581,11 +587,11 @@ describe('terminal crash recovery', () => {
       workerId: 'recovered-winner',
       deliveredByCallId: 'prior-solved-wait',
     })
-    const resultEvent = agent.session.events.find((event): event is SessionEvent<'tool/result'> => (
+    const resultEvent = events.find((event): event is SessionEvent<'tool/result'> => (
       event.type === 'tool/result'
-      && event.data.message.source.callId === CallId(waitCallId)
+      && event.data.message.source.callId === ToolCallId(waitCallId)
     ))
-    expect(resultEvent?.data.message.content[0]).toMatchObject({ isError: false })
+    expect(resultEvent?.data.message).toMatchObject({ isError: false })
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.wait, agent)).toBeUndefined()
   })
 })
@@ -596,6 +602,8 @@ describe('authoritative final wait lifecycle', () => {
     const { ctx, agent, runtime, root, adapter, disposed } = await harness([
       toolCallResponse(waitCallId, RUNTIME_TOOL_NAMES.wait, {}),
     ])
+    const events: SessionEvent[] = []
+    agent.ctx.on('session/event', (_session, event) => { events.push(event) })
     const state = runtime.store.currentState()
     await writeFile(path.join(root, 'solution.md'), '# Solution\n\nThe proposition holds.\n')
     await runtime.store.recordCompletion({
@@ -626,12 +634,12 @@ describe('authoritative final wait lifecycle', () => {
     await until(() => disposed.mock.calls.length === 1)
 
     expect(adapter.requests).toHaveLength(1)
-    const resultEvent = agent.session.events.find((event): event is SessionEvent<'tool/result'> => (
+    const resultEvent = events.find((event): event is SessionEvent<'tool/result'> => (
       event.type === 'tool/result'
-      && event.data.message.source.callId === CallId(waitCallId)
+      && event.data.message.source.callId === ToolCallId(waitCallId)
     ))
-    expect(resultEvent?.data.message.content[0]).toMatchObject({ isError: false })
-    expect(agent.session.events.at(-1)).toMatchObject({
+    expect(resultEvent?.data.message).toMatchObject({ isError: false })
+    expect(events.at(-1)).toMatchObject({
       type: 'turn/end', data: { reason: { kind: 'completed' } },
     })
 

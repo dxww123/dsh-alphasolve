@@ -7,10 +7,11 @@ import { AlphaSolveController } from './controller.js'
 
 export * from './controller.js'
 export * from './runtime.js'
+export * from './session-state.js'
 export * from './types.js'
 
 export const name = 'dsh-alphasolve'
-export const inject = ['agents', 'tools', 'systemPrompt']
+export const inject = ['agents', 'tools', 'systemPrompt', 'sessionProjections']
 
 export interface Config {
   /** Built-in fallback after prompt, project, and user configuration (default 2). */

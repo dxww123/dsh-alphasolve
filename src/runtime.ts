@@ -5,7 +5,7 @@ import { lstat, mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
 
 import { assembleContextFor, type Agent } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
@@ -16,6 +16,7 @@ import type {
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 
 import { atomicWriteJson, readJsonObject } from './atomic.js'
+import { alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from './session-state.js'
 import { loadAlphaSolveConfig } from './config.js'
 import { DurableCurator, hasRecoverableCuratorTasks } from './curator.js'
 import { acquireWorkspaceLock, type WorkspaceLock } from './lock.js'
@@ -213,53 +214,8 @@ function narrowedIndexTool(definition: ToolDefinition): ToolDefinition {
 }
 
 function successfulToolResult(event: SessionEvent<'tool/result'>): boolean {
-  return event.data.message.content[0].isError === false
+  return event.data.message.isError !== true
 }
-
-function toolResultJson(event: SessionEvent<'tool/result'>): Record<string, unknown> | undefined {
-  if (!successfulToolResult(event)) return undefined
-  const result = event.data.message.content[0]
-  const text = result.content
-    .filter((block): block is Extract<(typeof result.content)[number], { type: 'text' }> => block.type === 'text')
-    .map(block => block.text)
-    .join('\n')
-  if (text === '') return undefined
-  try {
-    const value = JSON.parse(text) as unknown
-    return value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * A successful activation is durable user authorization for this session.
- * Any later stop call wins even if the process died before its result was
- * appended: fail closed rather than resurrecting an intentionally stopped run.
- */
-export function hasDurableAlphaSolveResumeIntent(events: readonly SessionEvent[]): boolean {
-  const calls = new Map<string, { readonly name: string; readonly sequence: number }>()
-  let latestActivation = -1
-  let latestStop = -1
-  for (const event of events) {
-    if (event.type === 'tool/call') {
-      const callId = String(event.data.callId)
-      calls.set(callId, { name: event.data.name, sequence: event.seq })
-      if (event.data.name === RUNTIME_TOOL_NAMES.stop) latestStop = Math.max(latestStop, event.seq)
-      continue
-    }
-    if (event.type !== 'tool/result') continue
-    const call = calls.get(String(event.data.message.source.callId))
-    if (call?.name !== ACTIVATE_TOOL_NAME_FOR_RECOVERY) continue
-    if (toolResultJson(event)?.activated === true) latestActivation = Math.max(latestActivation, call.sequence)
-  }
-  return latestActivation >= 0 && latestActivation > latestStop
-}
-
-// Kept local to avoid a runtime cycle from runtime.ts back through controller.ts.
-const ACTIVATE_TOOL_NAME_FOR_RECOVERY = 'alphasolve_activate'
 
 type RestoreProbe =
   | { readonly candidate: false; readonly workspace: string; readonly reason?: string }
@@ -268,7 +224,7 @@ type RestoreProbe =
 /** Read-only, fail-closed eligibility check before taking a workspace lock. */
 async function probeRuntimeRestore(agent: Agent): Promise<RestoreProbe> {
   const workspace = agent.session.header.cwd ?? ''
-  if (!hasDurableAlphaSolveResumeIntent(agent.session.events)) {
+  if (!hasDurableAlphaSolveResumeIntent(alphaSolveSessionState(agent))) {
     return { candidate: false, workspace }
   }
   let canonical: string
@@ -339,13 +295,7 @@ async function probeRuntimeRestore(agent: Agent): Promise<RestoreProbe> {
 }
 
 function committedToolCallIds(agent: Agent): Set<string> {
-  const result = new Set<string>()
-  for (const event of agent.session.events) {
-    if (event.type === 'tool/result' && successfulToolResult(event)) {
-      result.add(String(event.data.message.source.callId))
-    }
-  }
-  return result
+  return new Set(alphaSolveSessionState(agent).successfulWaitCallIds)
 }
 
 async function optionalLstat(file: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
@@ -665,7 +615,7 @@ export class AlphaSolveRuntime {
               type: 'text',
               text: `AlphaSolve curator task failed and needs orchestrator attention: id=${task.id}, kind=${task.kind}, error=${conciseError}`,
             }],
-            source: { kind: 'plugin', plugin: 'dsh-alphasolve' },
+            source: { kind: 'alphasolve', form: 'notice', summary: 'AlphaSolve curator task failed' },
           }))
         },
         drainTimeoutMs: 60_000,
@@ -686,7 +636,7 @@ export class AlphaSolveRuntime {
         message => {
           agent.inject(createUserMessage({
             content: [{ type: 'text', text: message }],
-            source: { kind: 'plugin', plugin: 'dsh-alphasolve' },
+            source: { kind: 'alphasolve', form: 'notice', summary: 'AlphaSolve worker update' },
           }))
         },
         error => {

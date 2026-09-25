@@ -9,7 +9,7 @@ import {
   type AgentStatus,
 } from '@deepseek-ai/dsh-agent'
 import {
-  CallId,
+  ToolCallId,
   createUserMessage,
   LlmAdapter,
   type GenerateOptions,
@@ -133,7 +133,7 @@ describe('dormant AlphaSolve trigger', () => {
     expect(requestsAlphaSolvePreflight(message('Use alphasolve_workflow now.'))).toBe(false)
     expect(requestsAlphaSolvePreflight(message(
       'AlphaSolve appears only in injected plugin context.',
-      { kind: 'plugin', plugin: 'test' },
+      { kind: 'alphasolve' },
     ))).toBe(false)
   })
 
@@ -232,7 +232,7 @@ describe('session-scoped preflight lifecycle', () => {
 
     const activation = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('activate-first'),
+      callId: ToolCallId('activate-first'),
       name: ACTIVATE_TOOL_NAME,
       arguments: { capacity: 2, overwriteSolution: false },
       agent: first,
@@ -245,7 +245,7 @@ describe('session-scoped preflight lifecycle', () => {
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.wait, second)).toBeUndefined()
     const guessed = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('second-guesses-worker'),
+      callId: ToolCallId('second-guesses-worker'),
       name: RUNTIME_TOOL_NAMES.worker,
       arguments: {},
       agent: second,
@@ -278,7 +278,7 @@ describe('session-scoped preflight lifecycle', () => {
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     const activation = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('activation-illegal-overwrite'),
+      callId: ToolCallId('activation-illegal-overwrite'),
       name: ACTIVATE_TOOL_NAME,
       arguments: { overwriteSolution: true },
       agent,
@@ -304,7 +304,7 @@ describe('session-scoped preflight lifecycle', () => {
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     const activation = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('activation-needs-confirmation'),
+      callId: ToolCallId('activation-needs-confirmation'),
       name: ACTIVATE_TOOL_NAME,
       arguments: { overwriteSolution: false },
       agent,
@@ -341,7 +341,7 @@ describe('session-scoped preflight lifecycle', () => {
     abort.abort(reason)
     const exec = {
       signal: abort.signal,
-      callId: CallId('activation-already-aborted'),
+      callId: ToolCallId('activation-already-aborted'),
       name: ACTIVATE_TOOL_NAME,
       arguments: { overwriteSolution: false },
       agent,
@@ -362,11 +362,12 @@ describe('session-scoped preflight lifecycle', () => {
 })
 
 describe('same-session cold resume lifecycle', () => {
-  it('holds the first followup in maintenance until runtime tools are mounted', async () => {
+  it('finishes awaited agent initialization before the first followup can use runtime tools', async () => {
     const ctx = await harness()
     const adapter = new CapturingAdapter()
     ctx.llm.registerAdapter(['unused'], adapter)
     const gate = Promise.withResolvers<void>()
+    ctx.on('dispose', () => gate.resolve())
     let runtimeFiber: Fiber | undefined
     const runtimeDispose = vi.fn(async () => runtimeFiber?.dispose())
     const restore = vi.fn(async (agent: Agent): Promise<RuntimeRestoreResult> => {
@@ -394,7 +395,8 @@ describe('same-session cold resume lifecycle', () => {
       if (subject === agent) claimed += 1
     })
 
-    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    const initialized = agent.runMaintenance(() =>
+      agentEvents(ctx, agent).serial('agent/created', { source: 'resume' }))
     agent.followup(message('继续'))
     await Promise.resolve()
 
@@ -404,6 +406,7 @@ describe('same-session cold resume lifecycle', () => {
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
 
     gate.resolve()
+    await initialized
     await agent.whenIdle()
 
     expect(claimed).toBe(1)
@@ -411,6 +414,43 @@ describe('same-session cold resume lifecycle', () => {
     expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain(RUNTIME_TOOL_NAMES.worker)
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeDefined()
+  })
+
+  it('awaits cancelled initialization work and leaves no recovery diagnostic or mounted preflight', async () => {
+    const ctx = await harness()
+    const gate = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<AbortSignal>()
+    ctx.on('dispose', () => gate.resolve())
+    const restore = vi.fn(async (
+      _agent: Agent,
+      _defaults: object,
+      _onDisposed: () => void,
+      signal?: AbortSignal,
+    ): Promise<RuntimeRestoreResult> => {
+      if (signal === undefined) throw new Error('restore must receive initialization cancellation')
+      entered.resolve(signal)
+      await gate.promise
+      return { restored: false, workspace: '/test/workspace', reason: 'late restore failure' }
+    })
+    new AlphaSolveController(ctx, { restore }).install()
+    const agent = await createAgent(ctx, 'controller-cancelled-resume')
+    const abort = new AbortController()
+    const initialization = agent.runMaintenance(() => agentEvents(ctx, agent).serial('agent/created', {
+      source: 'resume', signal: abort.signal,
+    }))
+    let initialized = false
+    void initialization.then(() => { initialized = true })
+    const restoreSignal = await entered.promise
+    abort.abort(new Error('resume cancelled'))
+    expect(restoreSignal.aborted).toBe(true)
+    await Promise.resolve()
+    expect(initialized).toBe(false)
+    gate.resolve()
+    await initialization
+    expect(agent.inbox.nextStep).toHaveLength(0)
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
   })
 
   it('silently returns to keyword-gated dormancy when no durable intent exists', async () => {
@@ -422,7 +462,7 @@ describe('same-session cold resume lifecycle', () => {
     new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-resume-dormant')
 
-    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agentEvents(ctx, agent).serial('agent/created', { source: 'resume' })
     await agent.whenIdle()
     expect(agent.inbox.nextStep).toHaveLength(0)
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
@@ -441,7 +481,7 @@ describe('same-session cold resume lifecycle', () => {
     new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-resume-failure')
 
-    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agentEvents(ctx, agent).serial('agent/created', { source: 'resume' })
     await agent.whenIdle()
 
     expect(agent.inbox.nextStep).toHaveLength(1)
@@ -462,7 +502,7 @@ describe('same-session cold resume lifecycle', () => {
     const agent = await createAgent(ctx, 'controller-resume-missing-tools')
     const inject = vi.spyOn(agent, 'inject')
 
-    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    await agentEvents(ctx, agent).serial('agent/created', { source: 'resume' })
     await agent.whenIdle()
 
     expect(inject).toHaveBeenCalledTimes(1)

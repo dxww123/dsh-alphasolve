@@ -1,6 +1,5 @@
 /** Session-owned AlphaSolve runtime: durable state, workers, tools, and teardown. */
 import { type Agent } from '@deepseek-ai/dsh-agent';
-import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import { type RoleTraceEvent } from './role-service.js';
 import { RuntimeStore } from './store.js';
 import { type ActivateResult } from './types.js';
@@ -51,12 +50,6 @@ export type RuntimeRestoreResult = {
     readonly runtime: AlphaSolveRuntime;
 };
 type ActivationMode = 'explicit' | 'session-resume';
-/**
- * A successful activation is durable user authorization for this session.
- * Any later stop call wins even if the process died before its result was
- * appended: fail closed rather than resurrecting an intentionally stopped run.
- */
-export declare function hasDurableAlphaSolveResumeIntent(events: readonly SessionEvent[]): boolean;
 /**
  * Preserve a completed or different-problem state before beginning a new
  * explicit AlphaSolve request. Research files remain in place; only runtime

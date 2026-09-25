@@ -5,7 +5,7 @@ import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -144,7 +144,6 @@ describe('AlphaSolveRoleService workflow roles', () => {
     expect(verifier?.modelSelection).toEqual({
       provider: 'main-provider',
       model: 'strict-verifier',
-      reasoningEffort: 'high',
     })
     expect(verifier?.permissionPolicy.allowedTools.has(SUBAGENT_TOOL_NAME)).toBe(true)
     expect(verifier?.permissionPolicy.paths.some(rule => rule.root === path.join(root, 'knowledge'))).toBe(false)
@@ -160,7 +159,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
 
     const denied = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('research-denied'),
+      callId: ToolCallId('research-denied'),
       name: SUBAGENT_TOOL_NAME,
       arguments: { type: 'research_reviewer', task: 'survey this' },
     })
@@ -169,7 +168,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
 
     const reasoning = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('reasoning-ok'),
+      callId: ToolCallId('reasoning-ok'),
       name: SUBAGENT_TOOL_NAME,
       arguments: { type: 'reasoning', task: 'check one implication' },
     })
@@ -212,7 +211,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
 
     const calculation = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('compute-helper'),
+      callId: ToolCallId('compute-helper'),
       name: SUBAGENT_TOOL_NAME,
       arguments: { type: 'compute', task: 'calculate 2+2' },
     })
@@ -345,14 +344,14 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
     })).resolves.toBe('finite-field-bound')
     expect(calls[0]).toMatchObject({
       role: 'generator', maxTurns: 1, allowedInheritedTools: [],
-      modelSelection: { provider: 'main-provider', model: 'namer-model', reasoningEffort: 'high' },
+      modelSelection: { provider: 'main-provider', model: 'namer-model' },
     })
     expect(calls[0]?.setupHelpers).toBeUndefined()
 
     await expect(service.runResearchReview({ signal: new AbortController().signal })).resolves.toBe('review')
     expect(calls[1]).toMatchObject({
       role: 'research_reviewer',
-      modelSelection: { provider: 'survey-provider', model: 'main-model', reasoningEffort: 'high' },
+      modelSelection: { provider: 'survey-provider', model: 'main-model' },
     })
     expect(calls[1]?.setupHelpers).toBeDefined()
     expect(calls[1]?.permissionPolicy.paths.some(rule => rule.root.includes('unverified_propositions'))).toBe(false)
@@ -398,7 +397,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
 
     const write = await childCtx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('curator-write'),
+      callId: ToolCallId('curator-write'),
       name: CURATOR_TOOL_NAMES.write,
       arguments: { path: 'knowledge/new-page.md', content: '# New page\n' },
     })
@@ -407,7 +406,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
 
     const deniedHelper = await childCtx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('curator-helper-denied'),
+      callId: ToolCallId('curator-helper-denied'),
       name: SUBAGENT_TOOL_NAME,
       arguments: { type: 'numerical_experiment', task: 'not curator-approved' },
     })

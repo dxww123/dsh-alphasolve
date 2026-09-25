@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 
 import {
   mergeModelConfigs,
@@ -85,7 +86,7 @@ describe('resolveRoleModelSelection', () => {
     const inherited = {
       provider: 'parent-route',
       model: 'parent-model',
-      reasoningEffort: 'medium' as never,
+      reasoningEffort: ReasoningEffortId('medium'),
     }
     expect(resolveRoleModelSelection('generator', inherited, {
       generator: { model: 'proof-model', reasoningEffort: 'max' },
@@ -94,6 +95,19 @@ describe('resolveRoleModelSelection', () => {
       model: 'proof-model',
       reasoningEffort: 'max',
     })
+  })
+
+  it('inherits effort on the same route and clears it when the provider or model changes', () => {
+    const inherited = {
+      provider: 'route', model: 'model', reasoningEffort: ReasoningEffortId('high'),
+    }
+    expect(resolveRoleModelSelection('generator', inherited)).toEqual(inherited)
+    expect(resolveRoleModelSelection('generator', inherited, {
+      generator: { model: 'other-model' },
+    })).toEqual({ provider: 'route', model: 'other-model' })
+    expect(resolveRoleModelSelection('generator', inherited, {
+      generator: { provider: 'other-route' },
+    })).toEqual({ provider: 'other-route', model: 'model' })
   })
 
   it('fails only when a newly-started role resolves to an unavailable route', () => {

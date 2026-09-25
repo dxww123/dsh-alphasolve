@@ -1,7 +1,9 @@
 import path from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, CreateAgentOptions, ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { Context } from '@deepseek-ai/cordis'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
 import { createRolePolicy } from '../src/permissions.js'
@@ -39,7 +41,7 @@ describe('role Agent technical timeouts', () => {
     const parent = {
       id: SessionId('parent-create-timeout'),
       options: {},
-      session: { header: {} },
+      session: { header: {}, requestHeader: () => undefined },
       ctx: { agents: { create }, get: vi.fn(() => undefined) },
     } as unknown as Agent
 
@@ -56,7 +58,7 @@ describe('role Agent technical timeouts', () => {
     const child = {
       id: SessionId('hanging-role'),
       options: {},
-      session: { events: [] },
+      session: {},
       followup: vi.fn(),
       whenIdle: vi.fn(() => new Promise<void>(() => undefined)),
       cancel,
@@ -65,7 +67,7 @@ describe('role Agent technical timeouts', () => {
     const parent = {
       id: SessionId('parent-idle-timeout'),
       options: {},
-      session: { header: {} },
+      session: { header: {}, requestHeader: () => undefined },
       ctx: { agents: { create }, get: vi.fn(() => undefined) },
     } as unknown as Agent
 
@@ -88,54 +90,82 @@ describe('role Agent technical timeouts', () => {
     }])
   })
 
-  it('uses the terminal retry turn and never reuses an earlier failed output', async () => {
+  it.each([true, false])('reads only the terminal retry response (response present: %s)', async (hasResponse) => {
     const dispose = vi.fn(() => Promise.resolve())
+    let sessionEvent: ((session: unknown, event: unknown) => void) | undefined
     const child = {
       id: SessionId('retried-role'),
       options: {},
-      session: {
-        events: [
-          { type: 'turn/start', data: { turn: 1 } },
-          { type: 'step/start', data: { turn: 1, step: 1 } },
-          {
-            type: 'assistant/message',
-            data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'stale attempt' }] } },
-          },
-          { type: 'step/end', data: { turn: 1, step: 1 } },
-          {
-            type: 'turn/end',
-            data: { turn: 1, reason: { kind: 'error', error: { message: 'transport', code: 'TRANSPORT' } } },
-          },
-          { type: 'turn/start', data: { turn: 2 } },
-          { type: 'step/start', data: { turn: 2, step: 1 } },
-          {
-            type: 'assistant/message',
-            data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: 'fresh success' }] } },
-          },
-          { type: 'step/end', data: { turn: 2, step: 1 } },
-          { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
-        ],
-      },
-      followup: vi.fn(),
+      session: {},
+      followup: vi.fn(() => {
+        for (const event of events) sessionEvent?.(child.session, event)
+      }),
       whenIdle: vi.fn(() => Promise.resolve()),
       cancel: vi.fn(),
     } as unknown as Agent
+    const events = [
+      { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'stale attempt' }] } } },
+      { type: 'turn/end', data: { turn: 1, reason: { kind: 'error' } } },
+      ...hasResponse ? [{ type: 'assistant/message', data: { turn: 2, message: { content: [{ type: 'text', text: 'fresh success' }] } } }] : [],
+      { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+    ]
+    const childCtx = {
+      get: vi.fn(() => undefined),
+      systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
+      tools: {
+        get: vi.fn(() => undefined), presentAs: vi.fn(), restrict: vi.fn(), guard: vi.fn(),
+      },
+      on: vi.fn((name: string, listener: (...args: unknown[]) => unknown) => {
+        if (name === 'session/event') sessionEvent = listener
+        return vi.fn()
+      }),
+    }
     const parent = {
       id: SessionId('parent-retried-role'),
       options: {},
-      session: { header: {} },
+      session: { header: {}, requestHeader: () => undefined },
       ctx: {
-        agents: { create: vi.fn(() => Promise.resolve({ agent: child, dispose })) },
+        agents: { create: vi.fn(async (request: CreateAgentOptions) => {
+          await request.setup?.(childCtx as Context, child)
+          return { agent: child, dispose }
+        }) },
         get: vi.fn(() => undefined),
       },
     } as unknown as Agent
 
     await expect(runRoleAgent(options(parent))).resolves.toMatchObject({
       agentId: 'retried-role',
-      text: 'fresh success',
+      text: hasResponse ? 'fresh success' : '',
       stopReason: 'completed',
       turnEndReason: { kind: 'completed' },
     })
+  })
+
+  it('creates immutable role routes from the latest request or explicit selection', async () => {
+    const factoryError = new Error('creation stopped after capturing options')
+    const create = vi.fn(() => Promise.reject(factoryError))
+    const logged: ModelSelection = {
+      provider: 'live-provider', model: 'live-model', reasoningEffort: ReasoningEffortId('high'),
+    }
+    const parent = {
+      id: SessionId('parent-current-route'),
+      options: { provider: 'startup-provider', model: 'startup-model', maxTokens: 500 },
+      session: { header: {}, requestHeader: () => ({ config: logged }) },
+      ctx: { agents: { create }, get: vi.fn(() => undefined) },
+    } as Agent
+
+    await expect(runRoleAgent(options(parent))).rejects.toBe(factoryError)
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({
+      parentAgent: parent,
+      agentOptions: { ...logged, maxTokens: 500 },
+    }))
+
+    await expect(runRoleAgent({
+      ...options(parent), modelSelection: { provider: 'role-provider', model: 'role-model' },
+    })).rejects.toBe(factoryError)
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentOptions: { provider: 'role-provider', model: 'role-model', maxTokens: 500 },
+    }))
   })
 
   it('renews inactivity on session events and nested-helper activity', async () => {
@@ -143,13 +173,14 @@ describe('role Agent technical timeouts', () => {
     try {
       let resolveIdle: (() => void) | undefined
       let sessionActivity: ((session: unknown, event: unknown) => void) | undefined
+      let streamActivity: ((payload: { agent: Agent }) => void) | undefined
       let preStep: ((
         payload: { agent: Agent; turn: number; step: number; signal: AbortSignal },
         next: () => Promise<{ kind: 'enter'; messages: [] }>,
       ) => Promise<unknown>) | undefined
       let nestedActivity: (() => void) | undefined
       const events: unknown[] = []
-      const session = { events }
+      const session = {}
       const child = {
         id: SessionId('active-role'),
         options: {},
@@ -159,9 +190,8 @@ describe('role Agent technical timeouts', () => {
         cancel: vi.fn(),
       } as unknown as Agent
       const childCtx = {
-        agent: child,
         get: vi.fn(() => undefined),
-        systemPrompt: { section: vi.fn() },
+        systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
         tools: {
           get: vi.fn(() => undefined),
           presentAs: vi.fn(() => vi.fn()),
@@ -170,19 +200,20 @@ describe('role Agent technical timeouts', () => {
         },
         on: vi.fn((name: string, listener: (...args: unknown[]) => unknown) => {
           if (name === 'session/event') sessionActivity = listener
+          if (name === 'agent/assistant-stream') streamActivity = listener
           if (name === 'agent/pre-step') preStep = listener as typeof preStep
           return vi.fn()
         }),
       }
       const dispose = vi.fn(() => Promise.resolve())
-      const create = vi.fn(async (request: { setup: (ctx: unknown) => Promise<void> }) => {
-        await request.setup(childCtx)
+      const create = vi.fn(async (request: { setup: (ctx: unknown, child: Agent) => Promise<void> }) => {
+        await request.setup(childCtx, child)
         return { agent: child, dispose }
       })
       const parent = {
         id: SessionId('parent-active-role'),
         options: {},
-        session: { header: {} },
+        session: { header: {}, requestHeader: () => undefined },
         ctx: { agents: { create }, get: vi.fn(() => undefined) },
       } as unknown as Agent
 
@@ -196,7 +227,7 @@ describe('role Agent technical timeouts', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       await vi.advanceTimersByTimeAsync(20)
-      sessionActivity?.(session, { type: 'assistant/chunk' })
+      streamActivity?.({ agent: child })
       await vi.advanceTimersByTimeAsync(20)
       await preStep?.(
         { agent: child, turn: 1, step: 1, signal: new AbortController().signal },
@@ -209,7 +240,6 @@ describe('role Agent technical timeouts', () => {
       sessionActivity?.(session, { type: 'tool/result' })
       events.push(
         { type: 'turn/start', data: { turn: 1 } },
-        { type: 'step/start', data: { turn: 1, step: 1 } },
         {
           type: 'assistant/message',
           data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'still active' }] } },
@@ -217,18 +247,23 @@ describe('role Agent technical timeouts', () => {
         { type: 'step/end', data: { turn: 1, step: 1 } },
         { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
       )
+      for (const event of events) sessionActivity?.(session, event)
       resolveIdle?.()
       await vi.advanceTimersByTimeAsync(0)
 
       await expect(run).resolves.toMatchObject({ text: 'still active', stopReason: 'completed', steps: 1 })
       expect(child.cancel).not.toHaveBeenCalled()
       expect(dispose).toHaveBeenCalledOnce()
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ parentAgent: parent }))
+      expect(childCtx.systemPrompt.section).toHaveBeenCalledWith({
+        name: 'deployment:persona-prefix', order: 0, text: 'Bounded reasoning role.',
+      })
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('uses the scoped pre-step payload to enforce the hard model-request cap', async () => {
+  it.each([1, 2])('caps model requests across %i turns', async (turns) => {
     let resolveIdle: (() => void) | undefined
     let sessionEvent: ((session: unknown, event: unknown) => void) | undefined
     let preStep: ((
@@ -236,7 +271,7 @@ describe('role Agent technical timeouts', () => {
       next: () => Promise<{ kind: 'enter'; messages: [] }>,
     ) => Promise<unknown>) | undefined
     const events: unknown[] = []
-    const session = { events }
+    const session = {}
     const cancel = vi.fn()
     const child = {
       id: SessionId('bounded-role'),
@@ -247,9 +282,8 @@ describe('role Agent technical timeouts', () => {
       cancel,
     } as unknown as Agent
     const childCtx = {
-      agent: child,
       get: vi.fn(() => undefined),
-      systemPrompt: { section: vi.fn() },
+      systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
       tools: {
         get: vi.fn(() => undefined),
         presentAs: vi.fn(() => vi.fn()),
@@ -266,11 +300,11 @@ describe('role Agent technical timeouts', () => {
     const parent = {
       id: SessionId('parent-bounded-role'),
       options: {},
-      session: { header: {} },
+      session: { header: {}, requestHeader: () => undefined },
       ctx: {
         agents: {
-          create: vi.fn(async (request: { setup: (ctx: unknown) => Promise<void> }) => {
-            await request.setup(childCtx)
+          create: vi.fn(async (request: { setup: (ctx: unknown, child: Agent) => Promise<void> }) => {
+            await request.setup(childCtx, child)
             return { agent: child, dispose }
           }),
         },
@@ -286,16 +320,18 @@ describe('role Agent technical timeouts', () => {
     })
     await Promise.resolve()
 
-    for (const step of [1, 2]) {
+    for (const request of [1, 2]) {
+      const turn = turns === 1 ? 1 : request
+      const step = turns === 1 ? request : 1
       await preStep?.(
-        { agent: child, turn: 1, step, signal: new AbortController().signal },
+        { agent: child, turn, step, signal: new AbortController().signal },
         () => Promise.resolve({ kind: 'enter', messages: [] }),
       )
-      sessionEvent?.(session, { type: 'step/start', data: { turn: 1, step } })
+      sessionEvent?.(session, { type: 'step/start', data: { turn, step } })
     }
     const downstream = vi.fn(() => Promise.resolve({ kind: 'enter' as const, messages: [] as [] }))
     await expect(preStep?.(
-      { agent: child, turn: 1, step: 3, signal: new AbortController().signal },
+      { agent: child, turn: turns, step: turns === 1 ? 3 : 2, signal: new AbortController().signal },
       downstream,
     )).resolves.toEqual({ kind: 'reject' })
     expect(downstream).not.toHaveBeenCalled()
@@ -312,6 +348,11 @@ describe('role Agent technical timeouts', () => {
         data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'parent' } } },
       },
     )
+    for (const event of events) {
+      if (typeof event === 'object' && event !== null && 'type' in event && event.type !== 'step/start') {
+        sessionEvent?.(session, event)
+      }
+    }
     resolveIdle?.()
 
     await expect(run).resolves.toMatchObject({ stopReason: 'max_turns', steps: 2 })

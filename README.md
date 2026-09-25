@@ -10,27 +10,27 @@ the solver tools for one session only when the user explicitly mentions
 
 ## Compatible DSH version
 
-This version is built and tested against the following DSH snapshot:
+This version targets the following DSH release and source revision:
 
 ```text
-branch: snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
-commit: 7b9644f2b664e46c9518506035aa6c8d5af4d8e8
-package version: 0.0.1-rc.2
+branch: master
+commit: 477b4f420553e8a52c2fbccc464d7561b239c443
+package version: 0.1.7-rc.2
 ```
 
-The plugin uses this snapshot's per-session Agent presets, scoped tool registry,
-model-selection service, and scoped Cordis packages. Use the matching DSH build;
-another snapshot is not covered by this compatibility statement.
+The plugin requires DSH `0.1.7-rc.2`, Cordis `4.0.4`, declarative Agent presets,
+Session projections, and the current Agent creation lifecycle. Older Harness
+releases are unsupported.
 
 ## Installation
 
-First make sure the installed `dsh` comes from the compatible snapshot above.
+First make sure the installed `dsh` comes from the compatible release above.
 For a source checkout, build that exact revision with:
 
 ```sh
 cd /path/to/deepseek-harness
 git fetch origin
-git switch snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
+git switch --detach 477b4f4205
 pnpm install
 pnpm run build
 ```
@@ -41,8 +41,8 @@ both the Web and Headless profiles:
 ```sh
 gh auth login -h github.com
 gh auth setup-git
-dsh plugin --profile web add 'github:dsh-external/dsh-alphasolve#<full-commit-sha>'
-dsh plugin --profile headless add 'github:dsh-external/dsh-alphasolve#<full-commit-sha>'
+dsh plugin --profile web add 'github:dxww123/dsh-alphasolve#<full-commit-sha>'
+dsh plugin --profile headless add 'github:dxww123/dsh-alphasolve#<full-commit-sha>'
 ```
 
 To install from a local checkout:
@@ -63,13 +63,22 @@ dsh --profile web --dump-config
 dsh --profile headless --dump-config
 ```
 
-`dsh --version` should report `0.0.1-rc.2`; both dependency lists should show
+`dsh --version` should report `0.1.7-rc.2`; both dependency lists should show
 `@dsh-external/dsh-alphasolve`; and each config dump should contain exactly one
 `dsh-alphasolve` row. The Headless profile must use the current
 `base + headless` composition, without the Web bundle. Install the plugin
 separately into every custom profile that should support it. Restart a running
 `dsh web` process after installation or upgrade; refreshing a browser tab alone
 does not load new code.
+
+## Desktop installation
+
+Use DeepSeek Harness Desktop `0.1.7-rc.2`. Build this checkout with
+`pnpm run build`, create a tarball with `pnpm pack`, and install that local
+package through the desktop application's Plugin Manager. Restart the Host
+when prompted. Desktop owns its own plugin profile; a Web or Headless CLI
+installation does not install the plugin into Desktop. The CLI cannot modify
+the Desktop profile.
 
 ## Usage
 
@@ -98,7 +107,7 @@ preset:
 |---|---|
 | `standard` | Supported. |
 | `cordis` | Supported; AlphaSolve's narrower role permissions still apply. |
-| `code` | Supported. While AlphaSolve is active, its tools use native presentation and `run_code` remains denied; unloading restores Code Mode. |
+| `ptc` | Supported. While AlphaSolve is active, its tools use native presentation and `run_code` remains denied; unloading restores PTC presentation. |
 | `minimal` | Refused with `agent_preset_missing_required_tools`; the plugin never grants the missing capabilities implicitly. |
 
 A custom preset is accepted only when it supplies `read`, `write`, `edit`,
@@ -174,3 +183,33 @@ no shell, `run_code`, Web, or general subagent access. AlphaSolve tools, native
 presentation override, prompts, capacity state, and permissions belong only to
 the triggering session; other sessions in the same `dsh web` process do not
 gain them.
+
+## Development and validation
+
+Keep this checkout next to the matching `deepseek-harness` checkout. Development
+dependencies link to its workspace packages; `vitest.config.ts` resolves tests
+directly to the Harness source and uses its standard decorator transform.
+Install and build Harness before compiling AlphaSolve or running the packed
+installation probe.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm test
+pnpm run test:packed
+```
+
+The packed installation probe loads the tarball through the real Cordis Loader
+and current Harness services in an isolated temporary consumer. It does not
+make a model request. Model-backed mathematical quality and a desktop UI run
+require separate verification with the configured model provider.
+
+On Windows, validate against an installed desktop without changing its profile:
+
+```sh
+pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"
+```
+
+This checks bundled peer versions and plugin loading under the installed
+Electron host. It uses temporary application directories and does not open the
+desktop UI or send a model request.
