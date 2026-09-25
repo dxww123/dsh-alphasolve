@@ -26,8 +26,8 @@ afterEach(async () => {
 
 describe('configuration loading', () => {
   it('resolves the fixed user path from DSH_HOME', () => {
-    expect(userConfigPath({ DSH_HOME: '/tmp/custom-dsh' })).toBe('/tmp/custom-dsh/alphasolve.json')
-    expect(userConfigDirectory({ DSH_HOME: '/tmp/custom-dsh' })).toBe('/tmp/custom-dsh')
+    expect(userConfigPath({ DSH_HOME: '/tmp/custom-dsh' })).toBe(path.join('/tmp/custom-dsh', 'alphasolve.json'))
+    expect(userConfigDirectory({ DSH_HOME: '/tmp/custom-dsh' })).toBe(path.normalize('/tmp/custom-dsh'))
   })
 
   it('applies prompt > project > user > built-in capacity and merges model fields', async () => {

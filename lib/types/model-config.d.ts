@@ -24,6 +24,7 @@ export type ModelAvailabilityCheck = (provider: string, model: string) => boolea
 /**
  * Resolve a complete immutable model selection for a newly-created role Agent.
  * Existing Agents retain the previously resolved object when configuration changes.
+ * A provider or model change clears inherited effort unless the override supplies it.
  */
 export declare function resolveRoleModelSelection(role: ModelRole, inherited: ModelSelection, overrides?: Readonly<Partial<Record<ModelRole, ModelOverride>>>, isAvailable?: ModelAvailabilityCheck): ModelSelection;
 //# sourceMappingURL=model-config.d.ts.map

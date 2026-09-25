@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export * from './controller.js';
 export * from './runtime.js';
+export * from './session-state.js';
 export * from './types.js';
 export declare const name = "dsh-alphasolve";
 export declare const inject: string[];

@@ -39,11 +39,11 @@ export interface RunRoleAgentOptions {
     readonly cwd: string;
     readonly persona: string;
     readonly prompt: string | readonly ContentBlock[];
-    /** AlphaSolve turns map to DSH model-request steps. */
+    /** Maximum admitted model-request steps across this invocation's turns. */
     readonly maxTurns: number;
     readonly signal: AbortSignal;
     readonly permissionPolicy: RolePermissionPolicy;
-    /** Complete resolved route; omit only when reasoning-effort inheritance is irrelevant. */
+    /** Complete resolved route; omission inherits the parent's current request route. */
     readonly modelSelection?: ModelSelection;
     readonly maxTokens?: number;
     /** Inherited file tools retained by tools.restrict; role-local helpers remain visible. */
@@ -67,8 +67,8 @@ export declare class RoleTechnicalTimeoutError extends Error {
     constructor(phase: 'create' | 'inactivity' | 'dispose', milliseconds: number);
 }
 /**
- * Run one fresh, single-turn DSH Agent with role-scoped prompt, route, tools,
- * path policy, cancellation, and an AlphaSolve max-step boundary.
+ * Run one fresh DSH Agent until idle, including automatic retry turns, with
+ * role-scoped prompt, route, tools, path policy, cancellation, and a step cap.
  */
 export declare function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult>;
 //# sourceMappingURL=role-runner.d.ts.map

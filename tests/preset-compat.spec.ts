@@ -13,9 +13,11 @@ import {
   assembleContextFor,
   type Agent,
 } from '@deepseek-ai/dsh-agent'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+import AgentPresets from '@deepseek-ai/dsh-agent-preset-registry'
+import AgentPreset from '@deepseek-ai/dsh-agent-preset'
+import { PtcRuntime, type PtcRunRequest, type PtcRunResult, type PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
 import {
-  CallId,
+  ToolCallId,
   createUserMessage,
   LlmAdapter,
   type GenerateOptions,
@@ -25,6 +27,8 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { RUN_CODE_NAME, defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+
+import { alphaSolveSessionProjection } from '../src/session-state.js'
 
 import {
   ACTIVATE_TOOL_NAME,
@@ -45,6 +49,19 @@ const FIXTURES = path.join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 
 const REQUIRED_FILE_TOOLS = ['read', 'write', 'edit', 'glob', 'grep'] as const
 const contexts: Context[] = []
 const temporaryRoots: string[] = []
+
+class PresentationRuntime extends PtcRuntime {
+  readonly language = 'typescript'
+  readonly isolation = 'fixture'
+
+  resolve(request: PtcRunRequest): PtcRunSpec {
+    return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 }
+  }
+
+  run(_spec: PtcRunSpec): Promise<PtcRunResult> {
+    throw new Error('preset presentation tests do not execute programs')
+  }
+}
 
 class CompletingAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
@@ -80,12 +97,24 @@ async function presetHarness(): Promise<Context> {
   ctx.baseUrl = `${pathToFileURL(FIXTURES).href}/`
   await ctx.plugin(Loader)
   await mountAgentLoopTestDependencies(ctx)
+  ctx.sessionProjections.register(alphaSolveSessionProjection)
   await ctx.plugin(AgentLoop, { agents: [] })
-  await ctx.plugin(AgentPresets, {
-    default: 'standard',
-    roots: [{ path: FIXTURES, trust: 'system' }],
-    includeUserRoot: false,
-  })
+  await ctx.plugin(PresentationRuntime)
+  await ctx.plugin(AgentPresets, { default: 'standard' })
+  for (const marker of ['standard', 'minimal', 'complete'] as const) {
+    await ctx.plugin(AgentPreset, {
+      id: marker,
+      plugins: [{
+        name: pathToFileURL(path.join(FIXTURES, 'plugins', 'alphasolve-compat.js')).href,
+        config: {
+          marker,
+          presentation: marker === 'minimal' ? 'native' : 'ptc',
+          complete: marker === 'complete',
+          tools: marker === 'minimal' ? ['read'] : [...REQUIRED_FILE_TOOLS, 'bash'],
+        },
+      }],
+    })
+  }
   return ctx
 }
 
@@ -93,6 +122,7 @@ async function headlessHarness(): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  ctx.sessionProjections.register(alphaSolveSessionProjection)
   await ctx.plugin(AgentLoop, { agents: [] })
   for (const name of [...REQUIRED_FILE_TOOLS, 'bash']) {
     ctx.tools.register(defineContentToolFixture({
@@ -147,14 +177,14 @@ async function submit(ctx: Context, agent: Agent, input: UserMessage): Promise<v
 async function activateFromPreflight(ctx: Context, agent: Agent) {
   return await ctx.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId(`activate-${agent.id}`),
+    callId: ToolCallId(`activate-${agent.id}`),
     name: ACTIVATE_TOOL_NAME,
     arguments: { overwriteSolution: false },
     agent,
   })
 }
 
-describe('new DSH Agent Preset compatibility', () => {
+describe('declarative Agent Preset compatibility', () => {
   it('discovers required tools through the parent agent scope and rejects an insufficient preset explicitly', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
@@ -181,10 +211,10 @@ describe('new DSH Agent Preset compatibility', () => {
     }
   })
 
-  it('temporarily presents a Code Mode parent natively and restores Code Mode after preflight disposal', async () => {
+  it('temporarily presents a PTC parent natively and restores PTC after preflight disposal', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
-    const agent = await createAgent(ctx, 'preset-code-preflight', root, 'standard')
+    const agent = await createAgent(ctx, 'preset-ptc-preflight', root, 'standard')
     const activate = vi.fn(async (subject: Agent): Promise<RuntimeActivationResult> => {
       // The preflight lease is released before the runtime owns presentation.
       expect(ctx.tools.get(RUN_CODE_NAME, subject)).toBeDefined()
@@ -239,7 +269,7 @@ describe('new DSH Agent Preset compatibility', () => {
     }
     const denied = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('preset-controller-runtime-denied-write'),
+      callId: ToolCallId('preset-controller-runtime-denied-write'),
       name: 'write',
       arguments: {
         file_path: 'verified_propositions/fabricated.md',
@@ -280,7 +310,7 @@ describe('new DSH Agent Preset compatibility', () => {
       .rejects.toMatchObject({ code: 'ENOENT' })
 
     // The failed activation restores the preflight lease until this response
-    // turn settles, then unloads it and exposes the inherited Code Mode again.
+    // turn settles, then unloads it and exposes the inherited PTC presentation again.
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
     expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
     agentEvents(ctx, agent).emit('agent/status', { status: 'idle' })
@@ -288,15 +318,15 @@ describe('new DSH Agent Preset compatibility', () => {
     expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
   })
 
-  it('keeps a live AlphaSolve runtime native and restores its inherited Code Mode on dispose', async () => {
+  it('keeps a live AlphaSolve runtime native and restores its inherited PTC presentation on dispose', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
-    const agent = await createAgent(ctx, 'preset-code-runtime', root, 'standard')
+    const agent = await createAgent(ctx, 'preset-ptc-runtime', root, 'standard')
 
     expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
     const collapsedRead = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('preset-code-runtime-collapsed-read'),
+      callId: ToolCallId('preset-ptc-runtime-collapsed-read'),
       name: 'read',
       arguments: { file_path: 'problem.md' },
       agent,
@@ -323,7 +353,7 @@ describe('new DSH Agent Preset compatibility', () => {
     expect(assembly.sections.map(section => section.name)).toContain('alphasolve:orchestrator')
     const configured = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('preset-code-runtime-native-configure'),
+      callId: ToolCallId('preset-ptc-runtime-native-configure'),
       name: RUNTIME_TOOL_NAMES.configure,
       arguments: { capacity: 3 },
       agent,
@@ -339,7 +369,7 @@ describe('new DSH Agent Preset compatibility', () => {
     expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
     const restoredCollapse = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('preset-code-runtime-restored-collapse'),
+      callId: ToolCallId('preset-ptc-runtime-restored-collapse'),
       name: 'read',
       arguments: { file_path: 'problem.md' },
       agent,
@@ -351,7 +381,7 @@ describe('new DSH Agent Preset compatibility', () => {
   })
 })
 
-describe('role child composition on the new DSH agent plane', () => {
+describe('role child preset composition', () => {
   it('inherits the exact parent preset, switches itself to native, and keeps the AlphaSolve permission boundary', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
@@ -381,7 +411,7 @@ describe('role child composition on the new DSH agent plane', () => {
         const assembly = await childCtx.systemPrompt.assemble(assembleContextFor(child))
         observed = {
           preset: ctx.agentPresets.composedPreset(childCtx),
-          durablePreset: child.session.header.agentPreset,
+          durablePreset: child.ctx.sessionProjections.stateOf(child.session, 'agentPreset') ?? undefined,
           toolNames: assembly.tools.map(tool => tool.name),
           sectionNames: assembly.sections.map(section => section.name),
         }
@@ -396,7 +426,7 @@ describe('role child composition on the new DSH agent plane', () => {
       expect(observed.toolNames, name).not.toContain(name)
     }
     expect(observed.sectionNames).toContain('preset:standard')
-    expect(observed.sectionNames).toContain('deployment:persona')
+    expect(observed.sectionNames).toContain('deployment:persona-prefix')
     expect(ctx.tools.get(RUN_CODE_NAME, parent)).toBeDefined()
   })
 

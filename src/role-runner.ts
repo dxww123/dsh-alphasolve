@@ -2,13 +2,12 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
-  installModelSelection,
   type Agent,
   type AgentHandle,
   type AgentOptions,
   type ModelSelection,
 } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   SessionId,
@@ -76,11 +75,11 @@ export interface RunRoleAgentOptions {
   readonly cwd: string
   readonly persona: string
   readonly prompt: string | readonly ContentBlock[]
-  /** AlphaSolve turns map to DSH model-request steps. */
+  /** Maximum admitted model-request steps across this invocation's turns. */
   readonly maxTurns: number
   readonly signal: AbortSignal
   readonly permissionPolicy: RolePermissionPolicy
-  /** Complete resolved route; omit only when reasoning-effort inheritance is irrelevant. */
+  /** Complete resolved route; omission inherits the parent's current request route. */
   readonly modelSelection?: ModelSelection
   readonly maxTokens?: number
   /** Inherited file tools retained by tools.restrict; role-local helpers remain visible. */
@@ -203,12 +202,13 @@ function assertRunOptions(options: RunRoleAgentOptions): void {
 
 function childAgentOptions(options: RunRoleAgentOptions): AgentOptions {
   const inherited = options.parent.options
-  const provider = options.modelSelection?.provider ?? inherited.provider
-  const model = options.modelSelection?.model ?? inherited.model
+  const route = options.modelSelection ?? options.parent.session.requestHeader()?.config ?? inherited
+  const { provider, model, reasoningEffort } = route
   const maxTokens = options.maxTokens ?? inherited.maxTokens
   return {
     ...(provider === undefined ? {} : { provider }),
     ...(model === undefined ? {} : { model }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
   }
 }
@@ -241,27 +241,22 @@ function mapStopReason(
   }
 }
 
+interface RoleOutput {
+  message: SessionEvent<'assistant/message'> | undefined
+  turnEnd: SessionEvent<'turn/end'> | undefined
+}
+
 function readRoleResult(
   child: Agent,
+  observed: RoleOutput,
   role: RoleKind,
   steps: number,
   hitMaxTurns: boolean,
   externallyAborted: boolean,
 ): RoleRunResult {
-  const events = child.session.events
-  // whenIdle() follows an automatic retry chain through its terminal turn.
-  // The last turn/end is therefore authoritative; restricting the assistant
-  // message to that same turn avoids reusing output from an earlier failed
-  // retry attempt.
-  const turnEnd = events.findLast(
-    (event): event is SessionEvent<'turn/end'> => event.type === 'turn/end',
-  )
-  const lastMessage = turnEnd === undefined
-    ? undefined
-    : events.findLast(
-        (event): event is SessionEvent<'assistant/message'> => event.type === 'assistant/message'
-          && event.data.turn === turnEnd.data.turn,
-      )
+  const { turnEnd } = observed
+  // A retry's terminal turn must not reuse an earlier attempt's response.
+  const lastMessage = observed.message?.data.turn === turnEnd?.data.turn ? observed.message : undefined
   const output = [...(lastMessage?.data.message.content ?? [])]
   return {
     agentId: child.id,
@@ -287,16 +282,15 @@ function reportFailure(
   phase: RoleRunFailurePhase,
   error: unknown,
   child: Agent | undefined,
+  observed: RoleOutput,
   steps: number,
   cleanupError?: unknown,
 ): void {
   const partial = child === undefined
     ? undefined
-    : readRoleResult(child, options.role, steps, false, options.signal.aborted)
-  const unterminatedMessage = child !== undefined && partial?.turnEndReason === undefined
-    ? child.session.events.findLast(
-        (event): event is SessionEvent<'assistant/message'> => event.type === 'assistant/message',
-      )
+    : readRoleResult(child, observed, options.role, steps, false, options.signal.aborted)
+  const unterminatedMessage = partial?.turnEndReason === undefined
+    ? observed.message
     : undefined
   const output = partial?.output.length === 0 && unterminatedMessage !== undefined
     ? [...unterminatedMessage.data.message.content]
@@ -328,8 +322,8 @@ function deriveInheritedAllowlist(childCtx: Context, child: Agent, policy: RoleP
 }
 
 /**
- * Run one fresh, single-turn DSH Agent with role-scoped prompt, route, tools,
- * path policy, cancellation, and an AlphaSolve max-step boundary.
+ * Run one fresh DSH Agent until idle, including automatic retry turns, with
+ * role-scoped prompt, route, tools, path policy, cancellation, and a step cap.
  */
 export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult> {
   assertRunOptions(options)
@@ -345,6 +339,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   const childId = SessionId(randomUUID())
   let hitMaxTurns = false
   let observedSteps = 0
+  const observed: RoleOutput = { message: undefined, turnEnd: undefined }
   let handle: AgentHandle | undefined
   const lifetime = new AbortController()
   const creationSignal = AbortSignal.any([options.signal, lifetime.signal])
@@ -358,6 +353,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
 
   const creation = options.parent.ctx.agents.create({
     sessionId: childId,
+    parentAgent: options.parent,
     meta: {
       cwd: path.resolve(options.cwd),
       parentSession: options.parent.id,
@@ -367,10 +363,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     },
     agentOptions: childAgentOptions(options),
     signal: creationSignal,
-    setup: async (childCtx): Promise<void> => {
-      const child = childCtx.agent
-      if (child === undefined) throw new Error('Agent factory did not associate the unpublished child context')
-
+    setup: async (childCtx, child): Promise<void> => {
       const joinedPreset = childCtx.get('agentPresets')?.composeFrom(childCtx, options.parent.ctx)
       if (joinedPreset !== agentPreset) {
         throw new Error('AlphaSolve role Agent did not join the parent Agent preset selected at creation')
@@ -378,17 +371,10 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       childCtx.tools.presentAs('native')
 
       childCtx.systemPrompt.section({
-        name: 'deployment:persona',
-        order: 0,
+        name: 'deployment:persona-prefix',
+        order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
         text: options.persona,
       })
-
-      if (options.modelSelection !== undefined) {
-        installModelSelection(childCtx, {
-          current: options.modelSelection,
-          assembled: undefined,
-        })
-      }
 
       installRolePermissionBoundary(childCtx, options.permissionPolicy)
       const allowedInherited = options.allowedInheritedTools === undefined
@@ -396,24 +382,25 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
         : [...options.allowedInheritedTools]
       childCtx.tools.restrict({ allow: allowedInherited })
 
-      // This agent-scoped session firehose covers message/chunk, durable step
-      // boundaries, tool calls/results, retry records, and terminal turn
-      // events. Step counts come from the durable boundary rather than a
-      // removed live agent/step mirror.
+      // Durable steps count model requests; transient stream frames keep a
+      // long-running response from expiring before its final message commits.
+      childCtx.on('agent/assistant-stream', ({ agent }) => {
+        if (agent === child) reportActivity()
+      })
       childCtx.on('session/event', (session, event) => {
         if (session !== child.session) return
         reportActivity()
         if (event.type === 'step/start') {
-          observedSteps = Math.max(observedSteps, event.data.step)
+          observedSteps += 1
         }
+        if (event.type === 'assistant/message') observed.message = event
+        if (event.type === 'turn/end') observed.turnEnd = event
       })
 
-      // The latest Agent API exposes the proposed step as a scoped payload.
-      // Intercepting before admission keeps maxTurns a hard model-request cap:
-      // the over-limit step never reaches the durable step/start boundary.
-      childCtx.on('agent/pre-step', ({ agent, step }, next) => {
+      // Admission rejects the over-limit step before its model request starts.
+      childCtx.on('agent/pre-step', ({ agent }, next) => {
         reportActivity()
-        if (step > options.maxTurns) {
+        if (observedSteps >= options.maxTurns) {
           hitMaxTurns = true
           agent.cancel({ kind: 'parent' })
           return Promise.resolve({ kind: 'reject' })
@@ -432,7 +419,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     // A broken factory may ignore cancellation and resolve late. Dispose that
     // late handle without keeping this worker or process alive.
     void creation.then(late => late.dispose()).catch(() => undefined)
-    reportFailure(options, childId, 'create', error, undefined, observedSteps)
+    reportFailure(options, childId, 'create', error, undefined, observed, observedSteps)
     throw error
   }
 
@@ -471,6 +458,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     }
     result = readRoleResult(
       child,
+      observed,
       options.role,
       hitMaxTurns ? options.maxTurns : observedSteps,
       hitMaxTurns,
@@ -504,6 +492,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       primaryPhase ?? failurePhase(primaryError),
       primaryError,
       child,
+      observed,
       hitMaxTurns ? options.maxTurns : observedSteps,
       cleanupError,
     )
@@ -516,6 +505,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       'dispose',
       cleanupError,
       child,
+      observed,
       hitMaxTurns ? options.maxTurns : observedSteps,
     )
     throw cleanupError

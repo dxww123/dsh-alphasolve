@@ -9,27 +9,25 @@ DeepSeek Harness。插件安装后默认休眠；只有用户明确提到 `Alpha
 
 ## 兼容的 DSH 版本
 
-当前版本针对以下 DSH snapshot 构建并通过测试：
+当前版本面向以下 DSH 发布版本和源码 revision：
 
 ```text
-branch: snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
-commit: 7b9644f2b664e46c9518506035aa6c8d5af4d8e8
-package version: 0.0.1-rc.2
+branch: master
+commit: 477b4f420553e8a52c2fbccc464d7561b239c443
+package version: 0.1.7-rc.2
 ```
 
-插件使用这一版 DSH 的逐 session Agent preset、scoped tool registry、模型选择服务和
-scoped Cordis 包。请使用与上面 revision 一致的 DSH build；本兼容声明不覆盖其他
-snapshot。
+插件要求 DSH `0.1.7-rc.2`、Cordis `4.0.4`、声明式 Agent preset、Session 投影和当前的 Agent 创建生命周期。不支持更早的 Harness 版本。
 
 ## 安装
 
-先确认已安装的 `dsh` 来自上述兼容 snapshot。使用源码 checkout 时，在该精确 revision
+先确认已安装的 `dsh` 来自上述兼容版本。使用源码 checkout 时，在该精确 revision
 上构建：
 
 ```sh
 cd /path/to/deepseek-harness
 git fetch origin
-git switch snapshots/20260812T172954Z-final-unwatermarked-5fa48343c7
+git switch --detach 477b4f4205
 pnpm install
 pnpm run build
 ```
@@ -40,8 +38,8 @@ profile：
 ```sh
 gh auth login -h github.com
 gh auth setup-git
-dsh plugin --profile web add 'github:dsh-external/dsh-alphasolve#<完整-commit-SHA>'
-dsh plugin --profile headless add 'github:dsh-external/dsh-alphasolve#<完整-commit-SHA>'
+dsh plugin --profile web add 'github:dxww123/dsh-alphasolve#<完整-commit-SHA>'
+dsh plugin --profile headless add 'github:dxww123/dsh-alphasolve#<完整-commit-SHA>'
 ```
 
 从本地 checkout 安装：
@@ -62,11 +60,15 @@ dsh --profile web --dump-config
 dsh --profile headless --dump-config
 ```
 
-`dsh --version` 应输出 `0.0.1-rc.2`，两份依赖列表都应显示
+`dsh --version` 应输出 `0.1.7-rc.2`，两份依赖列表都应显示
 `@dsh-external/dsh-alphasolve`，两份 config dump 都应恰好包含一条
 `dsh-alphasolve`。Headless profile 必须使用当前的 `base + headless` 组合，不能包含
 Web bundle。自定义 profile 需要单独安装插件。安装或升级后应重新启动正在运行的
 `dsh web` 进程；仅刷新浏览器页面不会加载新代码。
+
+## 桌面端安装
+
+使用 DeepSeek Harness Desktop `0.1.7-rc.2`。先在此仓库运行 `pnpm run build`，再运行 `pnpm pack` 生成安装包，通过桌面端的插件管理器安装该本地包，并按提示重启 Host。桌面端拥有独立的插件 profile；通过 CLI 安装到 Web 或 Headless 不会安装到桌面端。CLI 不能修改 Desktop profile。
 
 ## 使用
 
@@ -93,7 +95,7 @@ dsh web
 |---|---|
 | `standard` | 支持。 |
 | `cordis` | 支持；AlphaSolve 对各 role 的更窄权限仍然生效。 |
-| `code` | 支持。AlphaSolve 激活期间使用 native 工具呈现，`run_code` 仍被禁止；卸载后恢复 Code Mode。 |
+| `ptc` | 支持。AlphaSolve 激活期间使用 native 工具呈现，`run_code` 仍被禁止；卸载后恢复 PTC 呈现。 |
 | `minimal` | 返回 `agent_preset_missing_required_tools` 并拒绝激活；插件不会暗中补充缺少的权限。 |
 
 自定义 preset 必须同时提供 `read`、`write`、`edit`、`glob` 和 `grep`，并且不能用
@@ -153,3 +155,24 @@ Web 进程重启后，只要重新打开的是同一个 session 和同一个工�
 再叠加 AlphaSolve 针对各 role 的权限收窄。worker 不能使用 shell、`run_code`、Web 或
 任意 subagent。AlphaSolve 工具、native 呈现覆盖、prompt、并发状态和权限只属于触发
 它的 session；同一 `dsh web` 进程中的其他 session 不会因此新增这些能力。
+
+## 开发与验证
+
+将此仓库与对应版本的 `deepseek-harness` 仓库放在同一父目录中。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先安装并构建 Harness。
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm test
+pnpm run test:packed
+```
+
+打包安装验证会在隔离的临时使用方目录中，通过真实 Cordis Loader 和当前 Harness 服务加载 tarball，不会发送模型请求。数学求解质量和桌面 UI 的完整流程需要使用已配置的模型提供方另行验证。
+
+在 Windows 上，可以直接对已安装的桌面端做加载验证：
+
+```sh
+pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"
+```
+
+该检查核对桌面端内置依赖版本，并在其 Electron Host 中加载插件；使用临时应用目录，不修改桌面端的 profile，不打开 UI，也不发送模型请求。

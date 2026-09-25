@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-alphasolve",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Session-scoped AlphaSolve workflow for DeepSeek Harness",
   "type": "module",
   "private": true,
@@ -33,7 +33,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:packed": "pnpm run build && node tests/packed-install.e2e.mjs",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:desktop-load": "pnpm run build && node tests/desktop-load.e2e.mjs"
   },
   "keywords": [
     "deepseek-harness",
@@ -49,23 +50,25 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/dsh-external/dsh-alphasolve"
+    "url": "https://github.com/dxww123/dsh-alphasolve"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "3.18.1-rc.1"
+    "@deepseek-ai/schemastery": "3.18.4",
+    "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1-rc.1",
-    "@deepseek-ai/dsh-agent": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-agent-presets": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-atomic-write": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-session": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "0.0.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.0.1-rc.2"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-agent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-agent-presets": {
+    "@deepseek-ai/dsh-agent-preset-registry": {
       "optional": true
     }
   },
@@ -75,11 +78,13 @@
     "@deepseek-ai/dsh-agent": "link:../deepseek-harness/packages/core/agent",
     "@deepseek-ai/dsh-agent-loop": "link:../deepseek-harness/packages/core/agent-loop",
     "@deepseek-ai/dsh-agent-loop-testkit": "link:../deepseek-harness/packages/test-support/agent-loop-testkit",
-    "@deepseek-ai/dsh-agent-presets": "link:../deepseek-harness/packages/preset/agent-presets",
+    "@deepseek-ai/dsh-agent-preset": "link:../deepseek-harness/packages/preset/agent-preset",
+    "@deepseek-ai/dsh-agent-preset-registry": "link:../deepseek-harness/packages/preset/agent-preset-registry",
     "@deepseek-ai/dsh-atomic-write": "link:../deepseek-harness/packages/util/atomic-write",
-    "@deepseek-ai/dsh-code-runtime": "link:../deepseek-harness/packages/code-runtime/code-runtime",
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-ptc-runtime": "link:../deepseek-harness/packages/ptc-runtime/ptc-runtime",
     "@deepseek-ai/dsh-session": "link:../deepseek-harness/packages/core/session",
+    "@deepseek-ai/dsh-session-projection": "link:../deepseek-harness/packages/session/session-projection",
     "@deepseek-ai/dsh-system-prompt": "link:../deepseek-harness/packages/core/system-prompt",
     "@deepseek-ai/dsh-tool-fs": "link:../deepseek-harness/packages/fs/tool-fs",
     "@deepseek-ai/dsh-tool-fs-search": "link:../deepseek-harness/packages/fs/tool-fs-search",
@@ -87,7 +92,8 @@
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@electron/fuses": "1.8.0"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

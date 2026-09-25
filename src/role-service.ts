@@ -372,9 +372,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
   }
 
   private inheritedModelSelection(): ModelSelection {
-    const logged = this.parent.session.requestHeader()?.config
-    const provider = logged?.provider ?? this.parent.options.provider
-    const model = logged?.model ?? this.parent.options.model
+    const inherited = this.parent.session.requestHeader()?.config ?? this.parent.options
+    const { provider, model, reasoningEffort } = inherited
     if (provider === undefined || provider.trim().length === 0
       || model === undefined || model.trim().length === 0) {
       throw new Error('AlphaSolve cannot inherit a model route before the main session has selected provider and model')
@@ -382,7 +381,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
     return Object.freeze({
       provider,
       model,
-      ...(logged?.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort }),
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     })
   }
 

@@ -1,4 +1,4 @@
-import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import {
   MODEL_ROLES,
@@ -113,7 +113,7 @@ export function parseModelConfig(value: unknown, source = 'configuration'): Alph
 export function parseModelConfigJson(text: string, source: string): AlphaSolveFileConfig {
   let value: unknown
   try {
-    value = JSON.parse(text) as unknown
+    value = JSON.parse(text)
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
     throw new TypeError(`${source}: invalid JSON: ${message}`)
@@ -183,6 +183,7 @@ export type ModelAvailabilityCheck = (provider: string, model: string) => boolea
 /**
  * Resolve a complete immutable model selection for a newly-created role Agent.
  * Existing Agents retain the previously resolved object when configuration changes.
+ * A provider or model change clears inherited effort unless the override supplies it.
  */
 export function resolveRoleModelSelection(
   role: ModelRole,
@@ -193,7 +194,8 @@ export function resolveRoleModelSelection(
   const override = overrides[role]
   const provider = override?.provider ?? inherited.provider
   const model = override?.model ?? inherited.model
-  const effort = override?.reasoningEffort ?? inherited.reasoningEffort
+  const sameRoute = provider === inherited.provider && model === inherited.model
+  const effort = override?.reasoningEffort ?? (sameRoute ? inherited.reasoningEffort : undefined)
 
   parseNonEmptyString(provider, 'resolved model selection', `${role}.provider`)
   parseNonEmptyString(model, 'resolved model selection', `${role}.model`)
@@ -205,8 +207,7 @@ export function resolveRoleModelSelection(
     provider,
     model,
     ...(effort === undefined ? {} : {
-      // ReasoningEffortId is a compile-time brand over string in dsh-llm.
-      reasoningEffort: effort as ReasoningEffortId,
+      reasoningEffort: ReasoningEffortId(effort),
     }),
   })
 }

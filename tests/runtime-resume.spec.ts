@@ -7,15 +7,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+
+import { alphaSolveSessionProjection, alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from '../src/session-state.js'
 
 import { RuntimeStore } from '../src/store.js'
 import { STATE_VERSION, type WorkerRecord } from '../src/types.js'
 import {
   activateAlphaSolveRuntime,
-  hasDurableAlphaSolveResumeIntent,
   restoreAlphaSolveRuntime,
   RUNTIME_TOOL_NAMES,
 } from '../src/runtime.js'
@@ -65,6 +66,7 @@ async function createRuntimeAgent(
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  ctx.sessionProjections.register(alphaSolveSessionProjection)
   registerFileToolFixtures(ctx, tools)
   await ctx.plugin(AgentLoop, { agents: [] })
   const handle = await ctx.agents.create({
@@ -81,7 +83,7 @@ function appendToolResult(
   name: string,
   result: Record<string, unknown>,
 ): void {
-  const callId = CallId(`${name}-${turn}`)
+  const callId = ToolCallId(`${name}-${turn}`)
   agent.session.append('turn/start', { turn })
   agent.session.append('step/start', { turn, step: 1 })
   agent.session.append('tool/call', {
@@ -110,7 +112,7 @@ function appendCrashLeftToolCall(agent: Agent, turn: number, name: string): void
   agent.session.append('tool/call', {
     turn,
     step: 1,
-    callId: CallId(`${name}-${turn}`),
+    callId: ToolCallId(`${name}-${turn}`),
     name,
     arguments: '{}',
   })
@@ -141,6 +143,7 @@ describe('same-session runtime recovery', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
+    ctx.sessionProjections.register(alphaSolveSessionProjection)
     await ctx.plugin(AgentLoop, { agents: [] })
     const handle = await ctx.agents.create({
       sessionId: SessionId('resume-without-intent-or-cwd'),
@@ -154,10 +157,10 @@ describe('same-session runtime recovery', () => {
   it('recognizes activation intent and lets a later explicit stop win', async () => {
     const { agent } = await createRuntimeAgent()
     appendToolResult(agent, 1, 'alphasolve_activate', { activated: true })
-    expect(hasDurableAlphaSolveResumeIntent(agent.session.events)).toBe(true)
+    expect(hasDurableAlphaSolveResumeIntent(alphaSolveSessionState(agent))).toBe(true)
 
     appendToolResult(agent, 2, 'alphasolve_stop', { stopped: true })
-    expect(hasDurableAlphaSolveResumeIntent(agent.session.events)).toBe(false)
+    expect(hasDurableAlphaSolveResumeIntent(alphaSolveSessionState(agent))).toBe(false)
   })
 
   it('does not resurrect after a crash-left stop call whose result was never persisted', async () => {
@@ -165,7 +168,7 @@ describe('same-session runtime recovery', () => {
     appendToolResult(agent, 1, 'alphasolve_activate', { activated: true })
     appendCrashLeftToolCall(agent, 2, 'alphasolve_stop')
 
-    expect(hasDurableAlphaSolveResumeIntent(agent.session.events)).toBe(false)
+    expect(hasDurableAlphaSolveResumeIntent(alphaSolveSessionState(agent))).toBe(false)
   })
 
   it('reattaches only the same session and preserves its durable runtime configuration', async () => {

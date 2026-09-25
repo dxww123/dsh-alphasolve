@@ -19,7 +19,7 @@ const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), '
 
 describe('DSH profile bundle', () => {
   it('owns Schemastery as an exact runtime dependency', () => {
-    expect(manifest.dependencies?.['@deepseek-ai/schemastery']).toBe('3.18.1-rc.1')
+    expect(manifest.dependencies?.['@deepseek-ai/schemastery']).toBe('3.18.4')
     expect(manifest.peerDependencies).not.toHaveProperty('@deepseek-ai/schemastery')
     expect(manifest.devDependencies).not.toHaveProperty('@deepseek-ai/schemastery')
   })
