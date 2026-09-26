@@ -41,6 +41,10 @@ and AlphaSolve `main` commit
   `@deepseek-ai/*` package names, and each role Agent receives its resolved model route at creation. A role
   inheriting the same provider/model also inherits reasoning effort; changing
   provider/model clears that effort unless the role explicitly configures it.
+- Curator persistence requires Harness `sessionPersistence`. The durable queue
+  reopens the same Session with `agents.resume`, rebuilding the task's scoped
+  tools on every invocation. Native subagent descriptors remain read-only
+  (`one-shot`): generic subagent continuation cannot reconstruct these tools.
 - AlphaSolve semantics: ordinary orchestrator/worker flow from local
   `main@a336b850`; MCTS is intentionally out of scope.
 

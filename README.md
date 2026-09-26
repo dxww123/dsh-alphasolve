@@ -215,6 +215,8 @@ not provide an interactive continuation command.
    plugin does not pretend to resume an LLM call in the middle of a workflow
    phase.
 
+The curator keeps one durable Session for the same main Session and problem generation, including after Desktop restarts or AlphaSolve reactivation. Each queued task restores that conversation with fresh task-local tools and permissions. It reuses its remembered wiki map and reads only relevant notes and current edit targets; health checks still inspect the root index. The Session ID is recorded in `.alphasolve/curator/session.json`, while Harness stores the conversation. A new main Session, changed problem, or a new generation after solving starts a separate curator conversation. Missing or corrupt saved history is reported as an error.
+
 Every worker is a fresh Agent joined to the same preset generation as its main
 session, then narrowed by AlphaSolve's role-specific restrictions. Workers have
 no shell, `run_code`, Web, or general subagent access. AlphaSolve tools, native

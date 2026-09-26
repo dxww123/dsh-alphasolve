@@ -1,4 +1,4 @@
-/** Production bridge from the fixed AlphaSolve workflow to fresh DSH role Agents. */
+/** Production bridge from the fixed AlphaSolve workflow to scoped DSH role Agents. */
 
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -17,6 +17,7 @@ import {
   resolvePythonOptions,
   type PythonOptions,
 } from './python-runtime.js'
+import { prepareCuratorSession } from './curator-session.js'
 import type {
   CuratorRunner,
   CuratorRunnerContext,
@@ -370,6 +371,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
   private readonly runner: RoleAgentRunner
   private readonly observer: AlphaSolveWorkflowObserver | undefined
   private readonly python: PythonOptions
+  private curatorInvocation: Promise<void> | undefined
   private readonly workerArtifactPaths = new Map<string, Set<string>>()
 
   constructor(options: AlphaSolveRoleServiceOptions) {
@@ -697,10 +699,28 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
   }
 
-  /** DurableCurator-compatible runner; it deliberately never traces itself. */
+  /** DurableCurator owns the serial queue; overlapping invocations cannot share its Session. */
   readonly runCurator: CuratorRunner = async (context: CuratorRunnerContext): Promise<void> => {
+    if (this.curatorInvocation !== undefined) throw new Error('A curator task is already running')
+    const invocation = this.runCuratorTask(context)
+    this.curatorInvocation = invocation
+    try {
+      await invocation
+    } finally {
+      this.curatorInvocation = undefined
+    }
+  }
+
+  private async runCuratorTask(context: CuratorRunnerContext): Promise<void> {
     throwIfAborted(context.signal)
-    const task = await this.curatorTaskPrompt(context.task)
+    const body = await this.curatorTaskPrompt(context.task)
+    const task = `# Current curator task
+Task ID: ${context.task.id}
+Task kind: ${context.task.kind}
+
+${body}`
+    const session = await prepareCuratorSession(this.workspace, this.parent.id)
+    throwIfAborted(context.signal)
     const admitted = allowedSubagents('curator')
     const extraTools = [...CURATOR_TOOLS, ...(admitted.length > 0 ? [SUBAGENT_TOOL_NAME] : [])]
     const policy = createRolePolicy('curator', {
@@ -709,6 +729,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
     const result = await this.runner({
       parent: this.parent,
+      session,
       ...this.observe({ role: 'curator' }),
       role: 'curator',
       cwd: this.workspace,

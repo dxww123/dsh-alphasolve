@@ -36,6 +36,6 @@ Modify `knowledge/common-errors.md` only when the task explicitly says it is bas
 
 ## Health And Contradictions
 
-Read `knowledge/index.md` first. Use program scans as triage and inspect files before moving, renaming, splitting, or deleting. Keep indexes consistent with the live tree. When new mathematics conflicts with an existing note, investigate assumptions and scope; resolve straightforward differences and preserve subtle alternatives as an explicit open gap.
+Reuse this Session's wiki map and prior decisions across tasks. Read `knowledge/index.md` on first orientation, after losing that context, or when changes outside this Session make it stale; otherwise read only relevant notes and current edit targets. The current task's permissions supersede earlier tasks, including permission to modify common errors. A repeated task ID is a retry: inspect existing results before repeating mutations. Keep task IDs out of the wiki. Use program scans as triage and inspect files before moving, renaming, splitting, or deleting. Keep indexes consistent with the live tree. When new mathematics conflicts with an existing note, investigate assumptions and scope; resolve straightforward differences and preserve subtle alternatives as an explicit open gap.
 
 Do not record pipeline chronology, maintenance logs, trivial repeated observations, unsupported mathematics, or duplicated trace prose.

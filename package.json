@@ -99,7 +99,8 @@
     "@deepseek-ai/dsh-system-prompt": "0.1.7-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
     "@deepseek-ai/dsh-sandbox": "0.1.7-rc.2",
-    "@deepseek-ai/dsh-subprocess": "0.1.7-rc.2"
+    "@deepseek-ai/dsh-subprocess": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.1.7-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent-preset-registry": {
@@ -155,7 +156,9 @@
     "vitest": "^4.1.8",
     "@deepseek-ai/dsh-sandbox": "link:../deepseek-harness/packages/sandbox/sandbox",
     "@deepseek-ai/dsh-sandbox-local": "link:../deepseek-harness/packages/sandbox/sandbox-local",
-    "@deepseek-ai/dsh-subprocess": "link:../deepseek-harness/packages/subprocess/subprocess"
+    "@deepseek-ai/dsh-subprocess": "link:../deepseek-harness/packages/subprocess/subprocess",
+    "@deepseek-ai/dsh-session-persistence": "link:../deepseek-harness/packages/session/session-persistence",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "link:../deepseek-harness/packages/session/session-persistence-jsonl"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

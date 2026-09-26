@@ -33,10 +33,18 @@ export interface RoleRunFailure {
 }
 /** Register role-local helper tools or result-capture listeners before publication. */
 export type RoleHelperSetup = (childCtx: Context, child: Agent, reportActivity: RoleActivityReporter) => void | Promise<void>;
+/** A persistent role log, with task-local Agent scopes reconstructed on each invocation. */
+export interface RoleSessionContinuation {
+    readonly id: ReturnType<typeof SessionId>;
+    readonly resume: boolean;
+    /** Persist the identity after the log is durable and before any task input is sent. */
+    readonly ready: () => Promise<void>;
+}
 export interface RunRoleAgentOptions {
     readonly parent: Agent;
+    readonly session?: RoleSessionContinuation;
     readonly role: RoleKind;
-    /** Absolute workspace/cwd for the fresh child session. */
+    /** Absolute workspace/cwd for the child session. */
     readonly cwd: string;
     readonly persona: string;
     readonly prompt: string | readonly ContentBlock[];
@@ -59,6 +67,7 @@ export interface RunRoleAgentOptions {
     /** Technical bounds only; they do not impose a total worker wall-clock limit. */
     readonly createTimeoutMs?: number;
     readonly inactivityTimeoutMs?: number;
+    /** Cancel after this deadline; persistent Session reuse still awaits complete disposal. */
     readonly disposeTimeoutMs?: number;
 }
 export declare const ROLE_CREATE_TIMEOUT_MS = 60000;
@@ -70,7 +79,7 @@ export declare class RoleTechnicalTimeoutError extends Error {
     constructor(phase: 'create' | 'inactivity' | 'dispose', milliseconds: number);
 }
 /**
- * Run one fresh DSH Agent until idle, including automatic retry turns, with
+ * Run one DSH Agent until idle, optionally reopening its durable Session, with
  * role-scoped prompt, route, tools, path policy, cancellation, and a step cap.
  */
 export declare function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult>;

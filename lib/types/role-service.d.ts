@@ -1,4 +1,4 @@
-/** Production bridge from the fixed AlphaSolve workflow to fresh DSH role Agents. */
+/** Production bridge from the fixed AlphaSolve workflow to scoped DSH role Agents. */
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { type PythonOptions } from './python-runtime.js';
@@ -86,6 +86,7 @@ export declare class AlphaSolveRoleService implements RoleInvoker {
     private readonly runner;
     private readonly observer;
     private readonly python;
+    private curatorInvocation;
     private readonly workerArtifactPaths;
     constructor(options: AlphaSolveRoleServiceOptions);
     private observe;
@@ -104,8 +105,9 @@ export declare class AlphaSolveRoleService implements RoleInvoker {
     /** Fresh, read-only, non-nesting research review route for the orchestrator. */
     readonly runResearchReview: (request: ResearchReviewRequest) => Promise<string>;
     private curatorTaskPrompt;
-    /** DurableCurator-compatible runner; it deliberately never traces itself. */
+    /** DurableCurator owns the serial queue; overlapping invocations cannot share its Session. */
     readonly runCurator: CuratorRunner;
+    private runCuratorTask;
 }
 /** Build the two AlphaSolve-main research navigation tools for one reviewer. */
 export declare function createResearchReviewToolDefinitions(tools: ResearchReviewTools): readonly ToolDefinition[];

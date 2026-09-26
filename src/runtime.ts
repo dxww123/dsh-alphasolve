@@ -19,6 +19,7 @@ import { atomicWriteJson, readJsonObject } from './atomic.js'
 import { alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from './session-state.js'
 import { loadAlphaSolveConfig } from './config.js'
 import { DurableCurator, hasRecoverableCuratorTasks } from './curator.js'
+import { CURATOR_SESSION_PATH, readCuratorSessionIdentity } from './curator-session.js'
 import { acquireWorkspaceLock, type WorkspaceLock } from './lock.js'
 import {
   createRolePolicy,
@@ -350,6 +351,7 @@ export async function archivePreviousGeneration(
   await validationStore.listCompletions()
   await validationStore.validateWorkers()
   await hasRecoverableCuratorTasks(workspace)
+  await readCuratorSessionIdentity(workspace)
 
   const suffix = `${new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')}-${randomUUID().slice(0, 8)}`
   const backupRelative = `.alphasolve/backups/generation-${suffix}`
@@ -367,6 +369,8 @@ export async function archivePreviousGeneration(
 
   const queue = await resolveWorkspacePath(workspace, '.alphasolve/curator/queue.json', { mustExist: false })
   if (await optionalLstat(queue) !== undefined) await rename(queue, path.join(backup, 'curator-queue.json'))
+  const curatorSession = await resolveWorkspacePath(workspace, CURATOR_SESSION_PATH, { mustExist: false })
+  if (await optionalLstat(curatorSession) !== undefined) await rename(curatorSession, path.join(backup, 'curator-session.json'))
   await options.afterPhase?.('curator', backup)
   await atomicWriteJson(path.join(backup, 'generation.json'), {
     archivedAt: new Date().toISOString(),
@@ -654,7 +658,7 @@ export class AlphaSolveRuntime {
         },
         () => lock.assertOwned(),
         async () => {
-          await curator?.stop()
+          await curator?.close()
         },
         record => observer.worker(record),
       )
@@ -676,7 +680,7 @@ export class AlphaSolveRuntime {
     } catch (error) {
       const cleanupErrors: unknown[] = []
       try {
-        await curator?.stop()
+        await curator?.close()
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError)
       }
@@ -885,7 +889,7 @@ export class AlphaSolveRuntime {
         const callId = String(exec.callId)
         this.waitCalls.add(callId)
         try {
-          if (this.terminalRecovery) await this.curator.stop()
+          if (this.terminalRecovery) await this.curator.close()
           const result = await this.manager.wait(callId, exec.signal)
           for (const completion of result.completed) {
             this.completionsSinceResearchReview.add(completion.workerId)
@@ -1099,7 +1103,7 @@ export class AlphaSolveRuntime {
         await this.store.updateState(state => ({ ...state, status: 'stopping' }))
       }
       await this.manager.stop(kind === 'cancelled' ? 'cancelled' : 'interrupted')
-      await this.curator.stop()
+      await this.curator.close()
       if (this.store.currentState().status !== 'solved') {
         await this.store.updateState(state => ({ ...state, status: 'interrupted' }))
       }

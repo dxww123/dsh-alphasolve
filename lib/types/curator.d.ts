@@ -18,7 +18,7 @@ export interface CuratorRunnerContext {
 export type CuratorRunner = (context: CuratorRunnerContext) => Promise<void>;
 export interface DurableCuratorOptions {
     readonly workspaceRoot: string;
-    /** Creates one fresh curator role-agent invocation for each durable task. */
+    /** Runs each durable task serially with task-local tools and a shared curator Session. */
     readonly runner: CuratorRunner;
     readonly idFactory?: () => string;
     readonly now?: () => Date;
@@ -77,6 +77,8 @@ export declare class DurableCurator {
     stop(options?: {
         readonly timeoutMs?: number;
     }): Promise<CuratorStopResult>;
+    /** Freeze and drain the queue, then await cancellation cleanup before releasing its workspace. */
+    close(): Promise<void>;
     private stopOnce;
 }
 /** Strict read-only recovery probe used before terminal-session teardown. */

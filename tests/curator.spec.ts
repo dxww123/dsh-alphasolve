@@ -387,6 +387,39 @@ describe('durable curator queue', () => {
     expect(durable.tasks.map(task => task.status)).toEqual(['pending', 'pending'])
   })
 
+  it('keeps close pending until the cancelled runner finishes cleanup', async () => {
+    const root = await workspace()
+    const entered = Promise.withResolvers<void>()
+    const aborted = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const curator = await DurableCurator.open({
+      workspaceRoot: root, drainTimeoutMs: 0,
+      runner: async ({ signal }) => {
+        const cancelled = new Promise<void>(resolve => {
+          signal.addEventListener('abort', () => { aborted.resolve(); resolve() }, { once: true })
+        })
+        entered.resolve()
+        await cancelled
+        await release.promise
+        throw signal.reason
+      },
+    })
+    await curator.submit({ id: 'cleanup', kind: 'digest' })
+    await entered.promise
+    let closed = false
+    const closing = curator.close().then(() => { closed = true })
+    try {
+      await aborted.promise
+      expect(closed).toBe(false)
+      expect(await curator.stop()).toMatchObject({ drained: false, pending: 1 })
+    } finally {
+      release.resolve()
+      await closing
+    }
+    expect(closed).toBe(true)
+    expect(await curator.snapshot()).toMatchObject([{ id: 'cleanup', status: 'pending' }])
+  })
+
   it('lets shutdown drain queued work before returning when the runner completes in time', async () => {
     const root = await workspace()
     const seen: string[] = []

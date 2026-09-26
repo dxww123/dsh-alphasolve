@@ -53,6 +53,7 @@ afterEach(async () => {
 
 function mainAgent(): Agent {
   return {
+    id: SessionId('main-role-service'),
     options: { provider: 'option-provider', model: 'option-model' },
     session: {
       requestHeader: () => ({

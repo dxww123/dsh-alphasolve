@@ -242,7 +242,7 @@ export function buildCuratorDigestTask(input: CuratorDigestInput): string {
     "```",
     "",
     "Update `knowledge/` from this trace. Metadata is private triage context: never copy worker, role, round, attempt, source-label, or session identifiers into the wiki.",
-    "Read `knowledge/index.md` first. Preserve reusable derivations, observations, failed routes, and open gaps; split oversized topics into focused folders with local indexes.",
+    "Use the remembered wiki map to choose relevant files. Preserve reusable derivations, observations, failed routes, and open gaps; split oversized topics into focused folders with local indexes.",
     commonErrors,
     "Before finishing, ensure `knowledge/index.md` accurately routes the current entries.",
   )

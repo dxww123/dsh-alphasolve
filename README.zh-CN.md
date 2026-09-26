@@ -189,6 +189,8 @@ Web 进程重启后，只要重新打开的是同一个 session 和同一个工�
    并且只生成一次 `interrupted` 完成项；主 session 读取后可重新派发替代 worker。插件
    不会伪装成能从某个 LLM workflow 阶段的中间位置继续执行。
 
+curator 在同一个主 Session、同一道题的同一轮求解中持续复用一个持久 Session，Desktop 重启或 AlphaSolve 重新激活后也会恢复。每个队列任务恢复对话历史，同时重新绑定当前任务的工具和权限。curator 复用已有的知识库结构记忆，只按需读取相关笔记与当前修改目标；健康检查仍会检查根索引。Session ID 保存在 `.alphasolve/curator/session.json`，对话历史由 Harness 保存。换主 Session、换题，或题目求解完成后重新开始一轮，会建立独立的 curator 对话。已保存的历史缺失或损坏时会明确报错。
+
 所有 worker 都是 fresh Agent：先加入主 session 正在使用的同一 preset generation，
 再叠加 AlphaSolve 针对各 role 的权限收窄。worker 不能使用 shell、`run_code`、Web 或
 任意 subagent。AlphaSolve 工具、native 呈现覆盖、prompt、并发状态和权限只属于触发
