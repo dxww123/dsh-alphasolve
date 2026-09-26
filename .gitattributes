@@ -1,0 +1,2 @@
+# The client bundle preserves third-party template literals containing whitespace-only lines.
+lib/client.js whitespace=-blank-at-eol

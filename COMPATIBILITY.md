@@ -8,6 +8,15 @@ and AlphaSolve `main` commit
 
 - Runtime: Node.js `^22.19.0` or `>=24.0.0`.
 - Package manager used for development: pnpm 11.
+- Compute runtime: a dedicated Python environment with SymPy, prepared by
+  `node scripts/setup-python.mjs` or selected with deployment `python.executable`.
+  The `compute` and `numerical_experiment` helpers use `alphasolve_python` with
+  per-helper persistent namespaces; no arithmetic-only fallback is retained.
+  Their scopes require Harness `subprocess` and `sandbox` services. The process
+  uses a read-only policy; Python denies project reads, writes, networking, and
+  child processes. Windows reports partial process confinement; the Python
+  policies do not provide a strong sandbox for hostile code or native extensions.
+  Approved role file tools remain the source of project inputs.
 - Migration validation platform: Windows.
 - Additional design targets: macOS and Linux. Path validation understands both
   POSIX and Windows spellings even when running on the other platform.
@@ -32,6 +41,10 @@ and AlphaSolve `main` commit
   `@deepseek-ai/*` package names, and each role Agent receives its resolved model route at creation. A role
   inheriting the same provider/model also inherits reasoning effort; changing
   provider/model clears that effort unless the role explicitly configures it.
+- Curator persistence requires Harness `sessionPersistence`. The durable queue
+  reopens the same Session with `agents.resume`, rebuilding the task's scoped
+  tools on every invocation. Native subagent descriptors remain read-only
+  (`one-shot`): generic subagent continuation cannot reconstruct these tools.
 - AlphaSolve semantics: ordinary orchestrator/worker flow from local
   `main@a336b850`; MCTS is intentionally out of scope.
 
@@ -60,3 +73,10 @@ installation disabled, resolves its package-owned runtime dependencies from the
 isolated consumer, checks peer versions against the local Harness, and activates
 it through the real Cordis Loader and service implementations; a config
 dump alone is not a production-loader acceptance test.
+
+The 0.3.0 client bundle adds a session-scoped workflow sidebar using the shipped
+workspace-file resource subscription and native one-shot Session viewer. Role
+Sessions publish the current subagent descriptor and parent catalog; workers
+remain multi-session workflows. The overview uses a versioned, atomic workspace
+index instead of extending the stored Session event vocabulary. No Harness
+source or installed Desktop patch is required.

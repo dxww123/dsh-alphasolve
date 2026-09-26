@@ -5,9 +5,13 @@ import {
   type Agent,
   type AgentHandle,
   type AgentOptions,
+  type CreateAgentOptions,
   type ModelSelection,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import type {} from '@deepseek-ai/dsh-session-persistence'
+import { foldSubagentDescriptor, snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import type { RoleRunObservation } from './workflow-observation.js'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   SessionId,
@@ -68,10 +72,19 @@ export type RoleHelperSetup = (
   reportActivity: RoleActivityReporter,
 ) => void | Promise<void>
 
+/** A persistent role log, with task-local Agent scopes reconstructed on each invocation. */
+export interface RoleSessionContinuation {
+  readonly id: ReturnType<typeof SessionId>
+  readonly resume: boolean
+  /** Persist the identity after the log is durable and before any task input is sent. */
+  readonly ready: () => Promise<void>
+}
+
 export interface RunRoleAgentOptions {
   readonly parent: Agent
+  readonly session?: RoleSessionContinuation
   readonly role: RoleKind
-  /** Absolute workspace/cwd for the fresh child session. */
+  /** Absolute workspace/cwd for the child session. */
   readonly cwd: string
   readonly persona: string
   readonly prompt: string | readonly ContentBlock[]
@@ -87,11 +100,14 @@ export interface RunRoleAgentOptions {
   readonly setupHelpers?: RoleHelperSetup
   /** Propagate nested-role activity to an owning role's inactivity watchdog. */
   readonly onActivity?: RoleActivityReporter
+  /** Durable main-session overview for this actual role invocation. */
+  readonly observation?: RoleRunObservation
   /** Internal diagnostic handoff used to persist partial traces on rejection. */
   readonly onFailure?: (failure: RoleRunFailure) => void
   /** Technical bounds only; they do not impose a total worker wall-clock limit. */
   readonly createTimeoutMs?: number
   readonly inactivityTimeoutMs?: number
+  /** Cancel after this deadline; persistent Session reuse still awaits complete disposal. */
   readonly disposeTimeoutMs?: number
 }
 
@@ -322,7 +338,7 @@ function deriveInheritedAllowlist(childCtx: Context, child: Agent, policy: RoleP
 }
 
 /**
- * Run one fresh DSH Agent until idle, including automatic retry turns, with
+ * Run one DSH Agent until idle, optionally reopening its durable Session, with
  * role-scoped prompt, route, tools, path policy, cancellation, and a step cap.
  */
 export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult> {
@@ -336,7 +352,18 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   )
   const disposeTimeoutMs = technicalTimeout(options.disposeTimeoutMs, ROLE_DISPOSE_TIMEOUT_MS, 'disposeTimeoutMs')
 
-  const childId = SessionId(randomUUID())
+  if (options.session !== undefined && options.parent.ctx.get('sessionPersistence') === undefined) {
+    throw new Error('Persistent AlphaSolve roles require the Harness sessionPersistence service')
+  }
+  const childId = options.session?.id ?? SessionId(randomUUID())
+  // Only the curator queue can rebuild task-local tools; generic subagent continuation must stay disabled.
+  const descriptor = options.observation === undefined && options.session === undefined
+    ? undefined
+    : snapshotSubagentDescriptor({
+        mode: 'one-shot', provider: 'alphasolve',
+        label: options.observation?.label ?? `AlphaSolve · ${options.role}`,
+      })
+  let descriptorAppended = false
   let hitMaxTurns = false
   let observedSteps = 0
   const observed: RoleOutput = { message: undefined, turnEnd: undefined }
@@ -351,7 +378,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   const presetService = options.parent.ctx.get('agentPresets')
   const agentPreset = presetService?.composedPreset(options.parent.ctx)
 
-  const creation = options.parent.ctx.agents.create({
+  const creationOptions = {
     sessionId: childId,
     parentAgent: options.parent,
     meta: {
@@ -364,6 +391,19 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     agentOptions: childAgentOptions(options),
     signal: creationSignal,
     setup: async (childCtx, child): Promise<void> => {
+      if (options.session?.resume) {
+        const header = child.session.header
+        if (header.parentSession !== options.parent.id || header.origin !== 'subagent'
+          || header.cwd === undefined || path.resolve(header.cwd) !== path.resolve(options.cwd)) {
+          throw new Error('Persistent AlphaSolve role Session has a different owner or workspace')
+        }
+        const prior = foldSubagentDescriptor(child.session.snapshotEvents())
+        if (prior !== undefined && (prior.mode !== 'one-shot' || prior.provider !== 'alphasolve'
+          || prior.label !== descriptor?.label)) throw new Error('Persistent AlphaSolve role descriptor does not match')
+        descriptorAppended = prior !== undefined
+        // The durable curator queue owns retries; cancel crash-left inbox copies before publication.
+        child.inbox.clear()
+      }
       const joinedPreset = childCtx.get('agentPresets')?.composeFrom(childCtx, options.parent.ctx)
       if (joinedPreset !== agentPreset) {
         throw new Error('AlphaSolve role Agent did not join the parent Agent preset selected at creation')
@@ -376,7 +416,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
         text: options.persona,
       })
 
-      installRolePermissionBoundary(childCtx, options.permissionPolicy)
+      installRolePermissionBoundary(childCtx, options.permissionPolicy, child)
       const allowedInherited = options.allowedInheritedTools === undefined
         ? deriveInheritedAllowlist(childCtx, child, options.permissionPolicy)
         : [...options.allowedInheritedTools]
@@ -392,25 +432,35 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
         reportActivity()
         if (event.type === 'step/start') {
           observedSteps += 1
+          options.observation?.progress(String(child.id), observedSteps)
         }
         if (event.type === 'assistant/message') observed.message = event
         if (event.type === 'turn/end') observed.turnEnd = event
       })
 
       // Admission rejects the over-limit step before its model request starts.
-      childCtx.on('agent/pre-step', ({ agent }, next) => {
+      childCtx.on('agent/pre-step', async ({ agent }, next) => {
         reportActivity()
         if (observedSteps >= options.maxTurns) {
           hitMaxTurns = true
           agent.cancel({ kind: 'parent' })
           return Promise.resolve({ kind: 'reject' })
         }
-        return next()
+        const decision = await next()
+        if (!descriptorAppended && descriptor !== undefined && decision.kind === 'enter') {
+          agent.session.append('subagent/descriptor', descriptor)
+          descriptorAppended = true
+        }
+        return decision
       })
 
       await options.setupHelpers?.(childCtx, child, reportActivity)
     },
-  })
+  } satisfies CreateAgentOptions
+  const creation = options.session?.resume
+    ? options.parent.ctx.agents.resume({ resumeSessionId: childId, parentAgent: options.parent,
+        agentOptions: creationOptions.agentOptions, signal: creationSignal, setup: creationOptions.setup })
+    : options.parent.ctx.agents.create(creationOptions)
   try {
     handle = await withTechnicalTimeout(creation, createTimeoutMs, 'create', () => {
       lifetime.abort(new RoleTechnicalTimeoutError('create', createTimeoutMs))
@@ -437,7 +487,23 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   let primaryError: unknown
   let primaryPhase: RoleRunFailurePhase | undefined
   let cleanupError: unknown
+  let observationStarted = false
   try {
+    if (options.session !== undefined && !options.session.resume) {
+      // Even an empty Session must survive a crash before publishing its durable identity.
+      if (!await child.ctx.sessions.flush(child.session)) throw new Error('Curator Session has no durability listener')
+    }
+    await options.session?.ready()
+    if (options.observation !== undefined) {
+      const cataloged = options.session !== undefined && options.parent.session.snapshotEvents()
+        .some(event => event.type === 'subagent/catalog' && event.data.childId === child.id)
+      if (!cataloged) options.parent.session.append('subagent/catalog', {
+        version: 0, childId: child.id, childCreatedAt: child.session.header.createdAt,
+        mode: 'one-shot', label: options.observation.label,
+      })
+      await options.observation.started(child)
+      observationStarted = true
+    }
     const watchdog = inactivityWatchdog(inactivityTimeoutMs, () => {
       lifetime.abort(new RoleTechnicalTimeoutError('inactivity', inactivityTimeoutMs))
       child.cancel({ kind: 'parent' })
@@ -479,9 +545,33 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       } catch (error) {
         void disposal.catch(() => undefined)
         cleanupError = error
+        if (options.session !== undefined) {
+          // Reuse must wait for the old writer and task tools to close, even after a deadline.
+          try {
+            await disposal
+          } catch (_disposalError) {
+            // The recorded deadline or disposal failure remains the diagnostic.
+          }
+        }
       }
     } catch (error) {
       cleanupError = error
+    }
+  }
+
+  if (observationStarted) {
+    const observationError = primaryError ?? cleanupError
+    try {
+      await options.observation?.finished(String(child.id),
+        observationError === undefined ? result?.stopReason ?? 'error' : externallyAborted ? 'aborted' : 'error',
+        hitMaxTurns ? options.maxTurns : observedSteps,
+        observationError === undefined ? undefined : observationError instanceof Error ? observationError.message : String(observationError))
+    } catch (error) {
+      try {
+        options.parent.ctx.logger.warn(`AlphaSolve role overview could not settle: ${error instanceof Error ? error.message : String(error)}`)
+      } catch (_diagnosticError) {
+        // Overview diagnostics must not replace the role's operational outcome.
+      }
     }
   }
 

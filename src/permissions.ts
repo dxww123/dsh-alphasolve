@@ -2,6 +2,7 @@ import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PreToolDecision, ToolExecution, ToolGuard } from '@deepseek-ai/dsh-tools'
+import { createScopedGlobTool } from './scoped-glob.js'
 
 /** Agent roles which receive an AlphaSolve-scoped filesystem view. */
 export type RoleKind =
@@ -270,6 +271,38 @@ export function normalizeUserPath(candidate: string): string {
   return segments.join(path.sep)
 }
 
+/** A denied role path, distinct from filesystem and configuration failures. */
+class RolePathAccessError extends Error {}
+
+function pathGuidance(policy: RolePermissionPolicy, access: PathAccess = 'read'): string {
+  const roots = policy.paths.filter(rule => rule.access.includes(access) && rule.effect !== 'deny')
+    .map(rule => path.relative(policy.cwd, rule.root).split(path.sep).join('/')
+      + (rule.kind === 'directory' ? '/' : '')
+      + (rule.relativePattern === undefined ? '' : ` (relative paths matching ${rule.relativePattern.source})`))
+  return roots.length === 0 ? `No paths permit ${access} access.` : `Permitted ${access} paths: ${[...new Set(roots)].join(', ')}.`
+}
+
+/** A broad glob visits only admitted roots; direct file access still requires its own grant. */
+function globRoots(policy: RolePermissionPolicy, requested: string): readonly string[] {
+  if (requested.replaceAll('\\', '/').split('/').includes('..')) throw new TypeError('parent path segments (..) are not allowed')
+  let relative = requested
+  if (path.isAbsolute(requested)) {
+    if (!isWithin(requested, policy.cwd, 'directory')) throw new RolePathAccessError('glob path must stay inside the workspace')
+    relative = path.relative(policy.cwd, requested) || '.'
+  }
+  const base = path.resolve(policy.cwd, normalizeUserPath(relative))
+  const match = applicableRules(policy, base, 'read')
+  if (match.denied !== undefined) throw new RolePathAccessError(`read access is denied for "${requested}"`)
+  const roots = match.allowed === undefined
+    ? policy.paths.filter(rule => rule.access.includes('read') && rule.effect !== 'deny' && isWithin(rule.root, base, 'directory')).map(rule => rule.root)
+    : [base]
+  if (roots.length === 0 && base !== policy.cwd) {
+    throw new RolePathAccessError(`read access is outside the ${policy.role} role boundary: "${requested}". ${pathGuidance(policy)}`)
+  }
+  return [...new Set(roots)].filter(root => !roots.some(other => other !== root && isWithin(root, other, 'directory')))
+    .map(root => path.relative(policy.cwd, root) || '.')
+}
+
 function isWithin(candidate: string, root: string, kind: PathPermissionRule['kind']): boolean {
   const relative = path.relative(root, candidate)
   if (kind === 'file') return relative === ''
@@ -336,10 +369,10 @@ export function assertLexicalPathAccess(
   const lexicalPath = absoluteFrom(policy.cwd, normalized)
   const match = applicableRules(policy, lexicalPath, access)
   if (match.denied !== undefined) {
-    throw new Error(`${access} access is denied for "${requestedPath}"`)
+    throw new RolePathAccessError(`${access} access is denied for "${requestedPath}"`)
   }
   if (match.allowed === undefined) {
-    throw new Error(`${access} access is outside the ${policy.role} role boundary: "${requestedPath}"`)
+    throw new RolePathAccessError(`${access} access is outside the ${policy.role} role boundary: "${requestedPath}". ${pathGuidance(policy, access)}`)
   }
   return lexicalPath
 }
@@ -391,13 +424,13 @@ export async function assertCanonicalContainment(
     const canonicalRule = { ...lexicalRule, root: canonicalRoot }
     if (!matchesPathRule(canonicalPath, canonicalRule)) continue
     if ((lexicalRule.effect ?? 'allow') === 'deny') {
-      throw new Error(`${access} access resolves into a denied path: "${requestedPath}"`)
+      throw new RolePathAccessError(`${access} access resolves into a denied path: "${requestedPath}"`)
     }
     allowed ??= canonicalRule
   }
 
   if (allowed === undefined) {
-    throw new Error(`${access} access escapes the ${policy.role} role boundary through a symbolic link: "${requestedPath}"`)
+    throw new RolePathAccessError(`${access} access escapes the ${policy.role} role boundary through a symbolic link: "${requestedPath}"`)
   }
   return { requestedPath, lexicalPath, canonicalPath, matchedRule: allowed }
 }
@@ -407,7 +440,7 @@ export function isForbiddenRoleTool(name: string): boolean {
 }
 
 /** Final synchronous policy boundary which later waterfall listeners cannot override. */
-export function createLexicalToolGuard(policy: RolePermissionPolicy): ToolGuard {
+export function createLexicalToolGuard(policy: RolePermissionPolicy, ownsScopedGlob: (execution: ToolExecution) => boolean = () => false): ToolGuard {
   return (execution): string | undefined => {
     if (policy.role !== 'orchestrator' && isForbiddenRoleTool(execution.name)) {
       return `tool "${execution.name}" is forbidden for AlphaSolve role agents`
@@ -418,7 +451,10 @@ export function createLexicalToolGuard(policy: RolePermissionPolicy): ToolGuard 
 
     try {
       const request = toolPathRequest(execution)
-      if (request !== undefined) assertLexicalPathAccess(policy, request.path, request.access)
+      if (request !== undefined) {
+        if (execution.name === 'glob' && ownsScopedGlob(execution)) globRoots(policy, request.path)
+        else assertLexicalPathAccess(policy, request.path, request.access)
+      }
       return undefined
     } catch (error: unknown) {
       return error instanceof Error ? error.message : String(error)
@@ -433,8 +469,29 @@ export function createLexicalToolGuard(policy: RolePermissionPolicy): ToolGuard 
  * assertCanonicalContainment for each path they accept; only the five standard
  * DSH filesystem tools have a common argument contract here.
  */
-export function installRolePermissionBoundary(ctx: Context, policy: RolePermissionPolicy): () => void {
-  const disposeGuard = ctx.tools.guard(createLexicalToolGuard(policy))
+export function installRolePermissionBoundary(ctx: Context, policy: RolePermissionPolicy, agent?: ToolExecution['agent']): () => void {
+  const inheritedGlob = policy.allowedTools.has('glob') ? ctx.tools.get('glob', agent) : undefined
+  const scopedGlob = inheritedGlob === undefined ? undefined : createScopedGlobTool(inheritedGlob, {
+    cwd: policy.cwd,
+    roots: base => globRoots(policy, base),
+    assertRoot: async root => { await assertCanonicalContainment(policy, root, 'read') },
+    canRead: async file => {
+      try {
+        await assertCanonicalContainment(policy, file, 'read')
+        return true
+      } catch (error) {
+        if (error instanceof RolePathAccessError) return false
+        throw error
+      }
+    },
+  })
+  const disposeGlob = scopedGlob === undefined ? undefined : ctx.tools.register(scopedGlob)
+  const ownsScopedGlob = (execution: ToolExecution): boolean => scopedGlob !== undefined && ctx.tools.get('glob', execution.agent) === scopedGlob
+  const disposeGuidance = ctx.systemPrompt.section({
+    name: 'alphasolve:file-paths', order: 51,
+    text: `File paths resolve from the session workspace, never a worker directory. Use workspace-relative paths for read/write/edit. ${pathGuidance(policy)} glob with omitted path or path="." discovers only readable files; grep requires an explicit readable path.`,
+  })
+  const disposeGuard = ctx.tools.guard(createLexicalToolGuard(policy, ownsScopedGlob))
   const disposeCanonical = ctx.on(
     'tools/pre-execute',
     async (execution, next): Promise<PreToolDecision> => {
@@ -442,7 +499,12 @@ export function installRolePermissionBoundary(ctx: Context, policy: RolePermissi
         const request = toolPathRequest(execution)
         if (request !== undefined) {
           if (execution.signal.aborted) return { kind: 'deny', reason: 'tool call was cancelled' }
-          await assertCanonicalContainment(policy, request.path, request.access)
+          if (execution.name === 'glob' && ownsScopedGlob(execution)) {
+            for (const root of globRoots(policy, request.path)) {
+              execution.signal.throwIfAborted()
+              await assertCanonicalContainment(policy, root, 'read')
+            }
+          } else await assertCanonicalContainment(policy, request.path, request.access)
           if (execution.signal.aborted) return { kind: 'deny', reason: 'tool call was cancelled' }
         }
       } catch (error: unknown) {
@@ -455,5 +517,7 @@ export function installRolePermissionBoundary(ctx: Context, policy: RolePermissi
   return () => {
     disposeCanonical()
     disposeGuard()
+    disposeGlob?.()
+    disposeGuidance()
   }
 }

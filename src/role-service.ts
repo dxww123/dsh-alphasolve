@@ -1,4 +1,4 @@
-/** Production bridge from the fixed AlphaSolve workflow to fresh DSH role Agents. */
+/** Production bridge from the fixed AlphaSolve workflow to scoped DSH role Agents. */
 
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -12,9 +12,12 @@ import type {
 } from '@deepseek-ai/dsh-tools'
 
 import {
-  CALCULATOR_TOOL_NAME,
-  createCalculatorTool,
-} from './calculator.js'
+  PYTHON_TOOL_NAME,
+  installPythonTool,
+  resolvePythonOptions,
+  type PythonOptions,
+} from './python-runtime.js'
+import { prepareCuratorSession } from './curator-session.js'
 import type {
   CuratorRunner,
   CuratorRunnerContext,
@@ -64,6 +67,8 @@ import type {
   WorkflowRole,
 } from './workflow.js'
 import { resolveWorkspacePath } from './workspace.js'
+import type { AlphaSolveWorkflowObserver } from './workflow-observation.js'
+import type { AlphaSolveRoleIdentity } from './workflow-view.js'
 
 export const SUBAGENT_TOOL_NAME = 'alphasolve_subagent'
 
@@ -124,6 +129,10 @@ export interface AlphaSolveRoleServiceOptions {
   readonly onTrace?: RoleTraceHandler
   /** Test seam; production uses runRoleAgent. */
   readonly runner?: RoleAgentRunner
+  /** Persistent desktop overview independent of optional detailed traces. */
+  readonly observer?: AlphaSolveWorkflowObserver
+  /** Deployment-owned interpreter and execution budgets. */
+  readonly python?: PythonOptions
 }
 
 export interface ResearchReviewRequest {
@@ -360,6 +369,9 @@ export class AlphaSolveRoleService implements RoleInvoker {
   private readonly getConfig: () => AlphaSolveConfig
   private readonly onTrace: RoleTraceHandler | undefined
   private readonly runner: RoleAgentRunner
+  private readonly observer: AlphaSolveWorkflowObserver | undefined
+  private readonly python: PythonOptions
+  private curatorInvocation: Promise<void> | undefined
   private readonly workerArtifactPaths = new Map<string, Set<string>>()
 
   constructor(options: AlphaSolveRoleServiceOptions) {
@@ -369,6 +381,12 @@ export class AlphaSolveRoleService implements RoleInvoker {
     this.getConfig = options.getConfig
     this.onTrace = options.onTrace
     this.runner = options.runner ?? runRoleAgent
+    this.observer = options.observer
+    this.python = options.python ?? resolvePythonOptions()
+  }
+
+  private observe(identity: AlphaSolveRoleIdentity): Pick<RunRoleAgentOptions, 'observation'> {
+    return this.observer === undefined ? {} : { observation: this.observer.role(identity) }
   }
 
   private inheritedModelSelection(): ModelSelection {
@@ -504,8 +522,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
         type: 'object',
         additionalProperties: false,
         properties: {
-          type: { type: 'string' },
-          task: { type: 'string' },
+          type: { type: 'string', enum: [...admitted], description: 'compute: bounded Python/SymPy calculation; numerical_experiment: bounded Python exploration; reasoning: a proof obligation; research_reviewer: a research survey.' },
+          task: { type: 'string', description: 'One bounded question with definitions, assumptions, and requested outputs.' },
         },
         required: ['type', 'task'],
       },
@@ -526,14 +544,15 @@ export class AlphaSolveRoleService implements RoleInvoker {
         }
         throwIfAborted(exec.signal)
 
-        const calculator = request.type === 'compute' || request.type === 'numerical_experiment'
+        const pythonEnabled = request.type === 'compute' || request.type === 'numerical_experiment'
         const helperPolicy = createRolePolicy(request.type, {
           workspace: this.workspace,
           delegatedReadRoots: readRoots(callerPolicy),
-          extraAllowedTools: calculator ? [CALCULATOR_TOOL_NAME] : [],
+          extraAllowedTools: pythonEnabled ? [PYTHON_TOOL_NAME] : [],
         })
         const run = await this.runWithTrace({
           parent: child,
+          ...this.observe({ role: request.type, ...(workerId === undefined ? {} : { workerId }) }),
           role: request.type,
           cwd: this.workspace,
           persona: loadRolePrompt(request.type),
@@ -543,9 +562,9 @@ export class AlphaSolveRoleService implements RoleInvoker {
           permissionPolicy: helperPolicy,
           modelSelection: this.modelSelection(request.type),
           onActivity: reportActivity,
-          ...(calculator ? {
+          ...(pythonEnabled ? {
             setupHelpers: (helperCtx: Context): void => {
-              helperCtx.tools.register(createCalculatorTool())
+              helperCtx.effect(() => installPythonTool(helperCtx, this.python))
             },
           } : {}),
         }, {
@@ -568,6 +587,13 @@ export class AlphaSolveRoleService implements RoleInvoker {
     const role = workflowRoleKind(request.role)
     const run = await this.runWithTrace({
       parent: this.parent,
+      ...this.observe({
+        role: request.role, workerId: request.workerId,
+        ...(request.workflowRound === undefined ? {} : { workflowRound: request.workflowRound }),
+        ...(request.verifierProfile === undefined ? {} : { verifierProfile: request.verifierProfile }),
+        ...(request.verifierAttempt === undefined ? {} : { verifierAttempt: request.verifierAttempt }),
+        ...(request.theoremAttempt === undefined ? {} : { theoremAttempt: request.theoremAttempt }),
+      }),
       role,
       cwd: request.cwd,
       persona: request.persona,
@@ -602,6 +628,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
     const propositionFile = path.join(workerDirectory, 'proposition.md')
     const result = await this.runner({
       parent: this.parent,
+      ...this.observe({ role: 'proposition_filename', workerId: request.workerId }),
       role: 'generator',
       cwd: this.workspace,
       persona: 'You are the AlphaSolve proposition filename generator. Return only the requested filename.',
@@ -631,6 +658,7 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
     const run = await this.runWithTrace({
       parent: this.parent,
+      ...this.observe({ role: 'research_reviewer', ...(request.workerId === undefined ? {} : { workerId: request.workerId }) }),
       role: 'research_reviewer',
       cwd: this.workspace,
       persona: loadRolePrompt('research_reviewer'),
@@ -671,10 +699,28 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
   }
 
-  /** DurableCurator-compatible runner; it deliberately never traces itself. */
+  /** DurableCurator owns the serial queue; overlapping invocations cannot share its Session. */
   readonly runCurator: CuratorRunner = async (context: CuratorRunnerContext): Promise<void> => {
+    if (this.curatorInvocation !== undefined) throw new Error('A curator task is already running')
+    const invocation = this.runCuratorTask(context)
+    this.curatorInvocation = invocation
+    try {
+      await invocation
+    } finally {
+      this.curatorInvocation = undefined
+    }
+  }
+
+  private async runCuratorTask(context: CuratorRunnerContext): Promise<void> {
     throwIfAborted(context.signal)
-    const task = await this.curatorTaskPrompt(context.task)
+    const body = await this.curatorTaskPrompt(context.task)
+    const task = `# Current curator task
+Task ID: ${context.task.id}
+Task kind: ${context.task.kind}
+
+${body}`
+    const session = await prepareCuratorSession(this.workspace, this.parent.id)
+    throwIfAborted(context.signal)
     const admitted = allowedSubagents('curator')
     const extraTools = [...CURATOR_TOOLS, ...(admitted.length > 0 ? [SUBAGENT_TOOL_NAME] : [])]
     const policy = createRolePolicy('curator', {
@@ -683,6 +729,8 @@ export class AlphaSolveRoleService implements RoleInvoker {
     })
     const result = await this.runner({
       parent: this.parent,
+      session,
+      ...this.observe({ role: 'curator' }),
       role: 'curator',
       cwd: this.workspace,
       persona: loadRolePrompt('curator'),
@@ -790,15 +838,23 @@ export function createResearchReviewToolDefinitions(
 
 /** Build the no-shell, knowledge-only tool surface for one curator invocation. */
 export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolDefinition[] {
+  const knowledgePath = {
+    type: 'string',
+    description: 'Workspace-relative path beginning with knowledge/, e.g. knowledge/index.md.',
+  } as const
+  const discoveryPath = {
+    type: 'string',
+    description: 'Workspace-relative knowledge/ path. Omitted or dot (.) selects knowledge/.',
+  } as const
   const read = jsonTool({
     name: CURATOR_TOOL_NAMES.read,
-    description: 'Read an exact line range from one file below knowledge/.',
+    description: 'Read one knowledge file and return the selected lines and total line count.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
-        path: { type: 'string' },
-        startLine: { type: 'integer' },
-        endLine: { type: 'integer' },
+        path: knowledgePath,
+        startLine: { type: 'integer', minimum: 1, description: 'Inclusive first line; defaults to 1.' },
+        endLine: { type: 'integer', minimum: 1, description: 'Inclusive last line; defaults to and is capped at the final line.' },
       },
       required: ['path'],
     },
@@ -829,7 +885,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
-        path: { type: 'string' }, content: { type: 'string' },
+        path: knowledgePath, content: { type: 'string' },
         mode: { type: 'string', enum: ['overwrite', 'append'] },
       },
       required: ['path', 'content'],
@@ -856,7 +912,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Replace one unique exact text occurrence in a knowledge file.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } },
+      properties: { path: knowledgePath, oldText: { type: 'string' }, newText: { type: 'string' } },
       required: ['path', 'oldText', 'newText'],
     },
     outputSchema: PATH_RESULT_SCHEMA,
@@ -877,7 +933,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Create one directory below knowledge/.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { path: { type: 'string' } }, required: ['path'],
+      properties: { path: knowledgePath }, required: ['path'],
     },
     outputSchema: PATH_RESULT_SCHEMA,
     execute: async (args, exec) => {
@@ -893,7 +949,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Rename one plain child name within a knowledge directory.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { directory: { type: 'string' }, oldName: { type: 'string' }, newName: { type: 'string' } },
+      properties: { directory: knowledgePath, oldName: { type: 'string' }, newName: { type: 'string' } },
       required: ['directory', 'oldName', 'newName'],
     },
     outputSchema: PATH_RESULT_SCHEMA,
@@ -914,7 +970,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Move one ordinary knowledge file into an existing knowledge directory.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { path: { type: 'string' }, destinationDirectory: { type: 'string' } },
+      properties: { path: knowledgePath, destinationDirectory: knowledgePath },
       required: ['path', 'destinationDirectory'],
     },
     outputSchema: PATH_RESULT_SCHEMA,
@@ -935,12 +991,12 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
-        sourcePath: { type: 'string' },
+        sourcePath: { type: 'string', description: 'Workspace-relative source below knowledge/references/.' },
         parts: {
           type: 'array',
           items: {
             type: 'object', additionalProperties: false,
-            properties: { path: { type: 'string' }, startLine: { type: 'integer' }, endLine: { type: 'integer' } },
+            properties: { path: { type: 'string', description: 'New workspace-relative file below knowledge/references/.' }, startLine: { type: 'integer' }, endLine: { type: 'integer' } },
             required: ['path', 'startLine', 'endLine'],
           },
         },
@@ -975,7 +1031,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Delete one ordinary knowledge file or one empty knowledge directory.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { path: { type: 'string' } }, required: ['path'],
+      properties: { path: knowledgePath }, required: ['path'],
     },
     outputSchema: PATH_RESULT_SCHEMA,
     execute: async (args, exec) => {
@@ -991,7 +1047,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'List immediate entries in one knowledge directory.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { path: { type: 'string' } },
+      properties: { path: discoveryPath },
     },
     outputSchema: {
       type: 'array',
@@ -1013,7 +1069,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     description: 'Find knowledge files matching a restricted glob.',
     parameters: {
       type: 'object', additionalProperties: false,
-      properties: { pattern: { type: 'string' } }, required: ['pattern'],
+      properties: { pattern: { type: 'string', description: 'Workspace-relative glob beginning with knowledge/, e.g. knowledge/**/*.md; supports *, **, and ?.' } }, required: ['pattern'],
     },
     outputSchema: { type: 'array', items: { type: 'string' } },
     execute: async (args, exec) => {
@@ -1030,7 +1086,7 @@ export function createCuratorTools(tools: CuratorKnowledgeTools): readonly ToolD
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
-        query: { type: 'string' }, path: { type: 'string' },
+        query: { type: 'string' }, path: discoveryPath,
         caseSensitive: { type: 'boolean' }, maxResults: { type: 'integer' },
       },
       required: ['query'],

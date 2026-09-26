@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -130,6 +130,32 @@ describe('worker admission and capacity', () => {
     workflow.resolve(started.workerId)
     await manager.stop()
     expect(manager.activeProgress()).toEqual([])
+  })
+
+  it('reports overview failures after ledger writes without rejecting or orphaning admitted work', async () => {
+    const workflow = controlledWorkflow()
+    const { root, store } = await fixture(1, workflow.execute)
+    const errors: unknown[] = []
+    const observedPhases: string[] = []
+    const manager = new WorkerManager(store, workflow.execute, () => undefined,
+      error => errors.push(error), undefined, undefined, async record => {
+        const saved = JSON.parse(await readFile(path.join(root, '.alphasolve', 'workers', `${record.id}.json`), 'utf8'))
+        expect(saved).toMatchObject({ id: record.id, phase: record.phase })
+        observedPhases.push(record.phase)
+        throw new Error('overview storage unavailable')
+      })
+    const started = await manager.start('observe this route')
+    expect(started.accepted).toBe(true)
+    if (started.workerId === undefined) throw new Error('missing admitted worker')
+    const context = workflow.contexts[0]
+    if (context === undefined) throw new Error('missing workflow context')
+    await context.progress({ phase: 'verifier', round: 1, verifierProfile: 'citation' })
+    workflow.resolve(started.workerId)
+    const waited = await manager.wait('overview-failure-wait', new AbortController().signal)
+    expect(waited.completed).toMatchObject([{ workerId: started.workerId, status: 'verified' }])
+    await manager.stop()
+    expect(observedPhases).toEqual(['created', 'verifier', 'complete'])
+    expect(errors).toHaveLength(3)
   })
 
   it('lowers capacity without cancelling active workers and blocks new admission', async () => {

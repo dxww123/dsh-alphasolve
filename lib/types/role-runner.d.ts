@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
+import type { RoleRunObservation } from './workflow-observation.js';
 import { type ContentBlock } from '@deepseek-ai/dsh-llm';
 import { SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session';
 import { type RoleKind, type RolePermissionPolicy } from './permissions.js';
@@ -32,10 +33,18 @@ export interface RoleRunFailure {
 }
 /** Register role-local helper tools or result-capture listeners before publication. */
 export type RoleHelperSetup = (childCtx: Context, child: Agent, reportActivity: RoleActivityReporter) => void | Promise<void>;
+/** A persistent role log, with task-local Agent scopes reconstructed on each invocation. */
+export interface RoleSessionContinuation {
+    readonly id: ReturnType<typeof SessionId>;
+    readonly resume: boolean;
+    /** Persist the identity after the log is durable and before any task input is sent. */
+    readonly ready: () => Promise<void>;
+}
 export interface RunRoleAgentOptions {
     readonly parent: Agent;
+    readonly session?: RoleSessionContinuation;
     readonly role: RoleKind;
-    /** Absolute workspace/cwd for the fresh child session. */
+    /** Absolute workspace/cwd for the child session. */
     readonly cwd: string;
     readonly persona: string;
     readonly prompt: string | readonly ContentBlock[];
@@ -51,11 +60,14 @@ export interface RunRoleAgentOptions {
     readonly setupHelpers?: RoleHelperSetup;
     /** Propagate nested-role activity to an owning role's inactivity watchdog. */
     readonly onActivity?: RoleActivityReporter;
+    /** Durable main-session overview for this actual role invocation. */
+    readonly observation?: RoleRunObservation;
     /** Internal diagnostic handoff used to persist partial traces on rejection. */
     readonly onFailure?: (failure: RoleRunFailure) => void;
     /** Technical bounds only; they do not impose a total worker wall-clock limit. */
     readonly createTimeoutMs?: number;
     readonly inactivityTimeoutMs?: number;
+    /** Cancel after this deadline; persistent Session reuse still awaits complete disposal. */
     readonly disposeTimeoutMs?: number;
 }
 export declare const ROLE_CREATE_TIMEOUT_MS = 60000;
@@ -67,7 +79,7 @@ export declare class RoleTechnicalTimeoutError extends Error {
     constructor(phase: 'create' | 'inactivity' | 'dispose', milliseconds: number);
 }
 /**
- * Run one fresh DSH Agent until idle, including automatic retry turns, with
+ * Run one DSH Agent until idle, optionally reopening its durable Session, with
  * role-scoped prompt, route, tools, path policy, cancellation, and a step cap.
  */
 export declare function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRunResult>;

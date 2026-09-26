@@ -160,8 +160,21 @@ export class WorkerManager {
     private readonly onBackgroundError: (error: unknown) => void = () => {},
     private readonly assertRuntimeOwned: () => Promise<void> = async () => undefined,
     private readonly onSolution: () => Promise<void> = async () => undefined,
+    private readonly onWorkerChanged: (record: WorkerRecord) => Promise<void> = async () => undefined,
   ) {
     this.solutionFound = store.currentState().status === 'solved'
+  }
+
+  private async reportWorkerChanged(record: WorkerRecord): Promise<void> {
+    try {
+      await this.onWorkerChanged(record)
+    } catch (error) {
+      try {
+        this.onBackgroundError(error)
+      } catch (_diagnosticError) {
+        // A failed overview write must not orphan an admitted worker.
+      }
+    }
   }
 
   /** Current active worker IDs in start order. */
@@ -335,6 +348,7 @@ export class WorkerManager {
       }
       try {
         await this.store.writeWorker(record)
+        await this.reportWorkerChanged(record)
       } catch {
         return { accepted: false, reason: 'internal_error', ...base() }
       }
@@ -374,6 +388,7 @@ export class WorkerManager {
     const progress = async (update: Partial<WorkerRecord>): Promise<void> => {
       record = { ...record, ...update, id: record.id, version: STATE_VERSION, updatedAt: new Date().toISOString() }
       await this.store.writeWorker(record)
+      await this.reportWorkerChanged(record)
       this.activeRecords.set(record.id, record)
     }
 

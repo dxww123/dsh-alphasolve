@@ -90,6 +90,29 @@ describe('role Agent technical timeouts', () => {
     }])
   })
 
+  it('preserves an inactivity failure when terminal overview persistence rejects', async () => {
+    const dispose = vi.fn(() => Promise.resolve())
+    const failure = vi.fn()
+    const child = {
+      id: SessionId('overview-failure-child'), session: { header: { createdAt: 1 } }, options: {},
+      followup: vi.fn(), whenIdle: () => new Promise<void>(() => undefined), cancel: vi.fn(),
+    } as Agent
+    const warning = vi.fn()
+    const parent = {
+      id: SessionId('overview-failure-parent'), options: {},
+      session: { header: {}, requestHeader: () => undefined, append: vi.fn() },
+      ctx: { agents: { create: async () => ({ agent: child, dispose }) }, get: () => undefined,
+        logger: { warn: warning } },
+    } as Agent
+    await expect(runRoleAgent({ ...options(parent), onFailure: failure,
+      observation: { label: 'fixture', started: async () => undefined, progress: () => undefined,
+        finished: async () => { throw new Error('overview unavailable') } },
+    })).rejects.toMatchObject({ name: 'RoleTechnicalTimeoutError', phase: 'inactivity' })
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(failure).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('overview unavailable'))
+  })
+
   it.each([true, false])('reads only the terminal retry response (response present: %s)', async (hasResponse) => {
     const dispose = vi.fn(() => Promise.resolve())
     let sessionEvent: ((session: unknown, event: unknown) => void) | undefined

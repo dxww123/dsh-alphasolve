@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": [],
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": ".client.tsbuildinfo"
+  },
+  "include": [
+    "src/client",
+    "src/workflow-view.ts",
+    "src/types.ts"
+  ]
+}

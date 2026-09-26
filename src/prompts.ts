@@ -116,10 +116,15 @@ export interface GeneratorTaskInput {
 export function buildGeneratorTask(input: GeneratorTaskInput): string {
   const sections = ["# Problem", input.problem]
   if (input.hint) sections.push("# General Hint", input.hint)
-  if (input.instruction) sections.push("# Task Guidance", input.instruction)
+  if (input.instruction?.trim()) sections.push("# Task Guidance", input.instruction)
   sections.push(
+    "# Workspace",
+    "Tool paths are relative to the project root; the worker directory does not change the working directory.",
+    input.instruction?.trim()
+      ? `Worker guidance file: \`${input.workerRelativePath}/worker_hint.md\`. Its content is already included as Task Guidance above; no reread is needed.`
+      : "No worker guidance file is supplied.",
     "# Output",
-    `Create \`proposition.md\` directly in your own directory \`${input.workerRelativePath}\`. `
+    `Write exactly \`${input.workerRelativePath}/proposition.md\`. `
       + "It must contain exactly `## Statement` followed by `## Proof`, with no remarks or extra headings. "
       + "The Statement must be pure mathematics, without a theorem-like label. "
       + "Cite established propositions with `\\ref{path-without-extension}` relative to `verified_propositions/`, "
@@ -237,7 +242,7 @@ export function buildCuratorDigestTask(input: CuratorDigestInput): string {
     "```",
     "",
     "Update `knowledge/` from this trace. Metadata is private triage context: never copy worker, role, round, attempt, source-label, or session identifiers into the wiki.",
-    "Read `knowledge/index.md` first. Preserve reusable derivations, observations, failed routes, and open gaps; split oversized topics into focused folders with local indexes.",
+    "Use the remembered wiki map to choose relevant files. Preserve reusable derivations, observations, failed routes, and open gaps; split oversized topics into focused folders with local indexes.",
     commonErrors,
     "Before finishing, ensure `knowledge/index.md` accurately routes the current entries.",
   )

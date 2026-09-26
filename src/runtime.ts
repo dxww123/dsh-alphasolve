@@ -19,6 +19,7 @@ import { atomicWriteJson, readJsonObject } from './atomic.js'
 import { alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from './session-state.js'
 import { loadAlphaSolveConfig } from './config.js'
 import { DurableCurator, hasRecoverableCuratorTasks } from './curator.js'
+import { CURATOR_SESSION_PATH, readCuratorSessionIdentity } from './curator-session.js'
 import { acquireWorkspaceLock, type WorkspaceLock } from './lock.js'
 import {
   createRolePolicy,
@@ -35,6 +36,7 @@ import {
   VERIFIED_SUBDIRECTORY_PATH_PATTERN,
 } from './project-tools.js'
 import { ORCHESTRATOR_PROMPT } from './prompts.js'
+import type { PythonOptions } from './python-runtime.js'
 import {
   AlphaSolveRoleService,
   type RoleTraceEvent,
@@ -49,6 +51,7 @@ import {
 } from './types.js'
 import { WorkerManager } from './worker-manager.js'
 import { createFixedWorkerExecutor } from './workflow.js'
+import { AlphaSolveWorkflowObserver } from './workflow-observation.js'
 import {
   backupSolution,
   canonicalWorkspace,
@@ -98,6 +101,8 @@ export function shouldEnqueueCuratorTrace(
 export interface AlphaSolveRuntimeDefaults {
   readonly defaultCapacity?: number
   readonly defaultDetailedTrace?: boolean
+  /** Deployment-owned Python execution settings. */
+  readonly python?: PythonOptions
 }
 
 export interface RuntimeActivationRequest {
@@ -346,6 +351,7 @@ export async function archivePreviousGeneration(
   await validationStore.listCompletions()
   await validationStore.validateWorkers()
   await hasRecoverableCuratorTasks(workspace)
+  await readCuratorSessionIdentity(workspace)
 
   const suffix = `${new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')}-${randomUUID().slice(0, 8)}`
   const backupRelative = `.alphasolve/backups/generation-${suffix}`
@@ -363,6 +369,8 @@ export async function archivePreviousGeneration(
 
   const queue = await resolveWorkspacePath(workspace, '.alphasolve/curator/queue.json', { mustExist: false })
   if (await optionalLstat(queue) !== undefined) await rename(queue, path.join(backup, 'curator-queue.json'))
+  const curatorSession = await resolveWorkspacePath(workspace, CURATOR_SESSION_PATH, { mustExist: false })
+  if (await optionalLstat(curatorSession) !== undefined) await rename(curatorSession, path.join(backup, 'curator-session.json'))
   await options.afterPhase?.('curator', backup)
   await atomicWriteJson(path.join(backup, 'generation.json'), {
     archivedAt: new Date().toISOString(),
@@ -567,7 +575,13 @@ export class AlphaSolveRuntime {
       })
       throwIfActivationCancelled(signal)
 
+      const observer = await AlphaSolveWorkflowObserver.open(snapshot.root, String(agent.id), error => {
+        agent.ctx.logger.warn(`AlphaSolve workflow overview write failed: ${errorMessage(error)}`)
+      })
+      for (const worker of await store.validateWorkers()) await observer.worker(worker)
       const roleService = new AlphaSolveRoleService({
+        observer,
+        ...(defaults.python === undefined ? {} : { python: defaults.python }),
         parent: agent,
         workspace: snapshot.root,
         getConfig: () => ({
@@ -644,8 +658,9 @@ export class AlphaSolveRuntime {
         },
         () => lock.assertOwned(),
         async () => {
-          await curator?.stop()
+          await curator?.close()
         },
+        record => observer.worker(record),
       )
       runtime = new AlphaSolveRuntime(
         agent,
@@ -665,7 +680,7 @@ export class AlphaSolveRuntime {
     } catch (error) {
       const cleanupErrors: unknown[] = []
       try {
-        await curator?.stop()
+        await curator?.close()
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError)
       }
@@ -756,7 +771,7 @@ export class AlphaSolveRuntime {
       workspace: this.workspace,
       extraAllowedTools: [...customNames, ...allowedInherited],
     })
-    installRolePermissionBoundary(ctx, policy)
+    installRolePermissionBoundary(ctx, policy, this.agent)
     ctx.tools.restrict({ allow: allowedInherited })
     ctx.systemPrompt.section({
       name: 'alphasolve:orchestrator',
@@ -874,7 +889,7 @@ export class AlphaSolveRuntime {
         const callId = String(exec.callId)
         this.waitCalls.add(callId)
         try {
-          if (this.terminalRecovery) await this.curator.stop()
+          if (this.terminalRecovery) await this.curator.close()
           const result = await this.manager.wait(callId, exec.signal)
           for (const completion of result.completed) {
             this.completionsSinceResearchReview.add(completion.workerId)
@@ -1088,7 +1103,7 @@ export class AlphaSolveRuntime {
         await this.store.updateState(state => ({ ...state, status: 'stopping' }))
       }
       await this.manager.stop(kind === 'cancelled' ? 'cancelled' : 'interrupted')
-      await this.curator.stop()
+      await this.curator.close()
       if (this.store.currentState().status !== 'solved') {
         await this.store.updateState(state => ({ ...state, status: 'interrupted' }))
       }

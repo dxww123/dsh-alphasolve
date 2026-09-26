@@ -123,6 +123,10 @@ export class CuratorToolError extends Error {
   }
 }
 
+function knowledgeDiscoveryRoot(value: string): string {
+  return value === '.' || value === './' || value === '.\\' ? KNOWLEDGE : value
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -460,7 +464,7 @@ export class CuratorKnowledgeTools {
       throw error
     }
     if (!isKnowledgeRelative(relativePath)) {
-      throw new CuratorToolError('curator tools are restricted to knowledge/', input)
+      throw new CuratorToolError('use a workspace-relative path beginning with knowledge/, e.g. knowledge/index.md', input)
     }
     const absolute = path.resolve(this.workspaceRoot, ...relativePath.split('/'))
     if (!isContained(this.knowledgeRoot, absolute)) {
@@ -785,6 +789,7 @@ export class CuratorKnowledgeTools {
     return resolved
   }
 
+  /** Read inclusive one-based lines, capping endLine at the file's final line. */
   async read(
     relativePath: string,
     options: { readonly startLine?: number; readonly endLine?: number } = {},
@@ -799,11 +804,12 @@ export class CuratorKnowledgeTools {
       return { path: target.relative, content: '', startLine: 0, endLine: 0, totalLines: 0 }
     }
     const startLine = options.startLine ?? 1
-    const endLine = options.endLine ?? lines.length
-    if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine)
-      || startLine < 1 || endLine < startLine || endLine > lines.length) {
-      throw new CuratorToolError('invalid inclusive line range', relativePath)
+    const requestedEndLine = options.endLine ?? lines.length
+    if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(requestedEndLine)
+      || startLine < 1 || startLine > lines.length || requestedEndLine < startLine) {
+      throw new CuratorToolError(`invalid inclusive line range; file has ${lines.length} lines, startLine must select an existing line, and endLine must be at least startLine`, relativePath)
     }
+    const endLine = Math.min(requestedEndLine, lines.length)
     return {
       path: target.relative,
       content: lines.slice(startLine - 1, endLine).join(''),
@@ -1225,8 +1231,9 @@ export class CuratorKnowledgeTools {
     )
   }
 
+  /** List immediate entries; an omitted path or dot selects knowledge/. */
   async list(relativePath = KNOWLEDGE): Promise<readonly CuratorDirectoryEntry[]> {
-    const target = await this.resolve(relativePath, true)
+    const target = await this.resolve(knowledgeDiscoveryRoot(relativePath), true)
     if (!(await stat(target.absolute)).isDirectory()) throw new CuratorToolError('path is not a directory', relativePath)
     const entries = await readdir(target.absolute, { withFileTypes: true })
     return entries
@@ -1255,7 +1262,7 @@ export class CuratorKnowledgeTools {
 
   async glob(pattern: string): Promise<readonly string[]> {
     const normalized = normalizeRelativePath(pattern)
-    if (!isKnowledgeRelative(normalized)) throw new CuratorToolError('glob is restricted to knowledge/', pattern)
+    if (!isKnowledgeRelative(normalized)) throw new CuratorToolError('use a workspace-relative glob beginning with knowledge/, e.g. knowledge/**/*.md', pattern)
     const matcher = globRegex(normalized)
     return (await this.walk()).filter(file => matcher.test(file))
   }
@@ -1265,7 +1272,7 @@ export class CuratorKnowledgeTools {
     options: { readonly path?: string; readonly caseSensitive?: boolean; readonly maxResults?: number } = {},
   ): Promise<readonly CuratorGrepMatch[]> {
     if (query.length === 0) throw new CuratorToolError('grep query must not be empty')
-    const root = options.path ?? KNOWLEDGE
+    const root = knowledgeDiscoveryRoot(options.path ?? KNOWLEDGE)
     const target = await this.resolve(root, true)
     const files = (await stat(target.absolute)).isFile() ? [target.relative] : await this.walk(target.relative)
     const needle = options.caseSensitive === false ? query.toLocaleLowerCase() : query

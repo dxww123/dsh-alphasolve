@@ -78,6 +78,7 @@ export declare class CuratorKnowledgeTools {
      */
     finalizeMetadata(): Promise<void>;
     private ensureDirectory;
+    /** Read inclusive one-based lines, capping endLine at the file's final line. */
     read(relativePath: string, options?: {
         readonly startLine?: number;
         readonly endLine?: number;
@@ -105,6 +106,7 @@ export declare class CuratorKnowledgeTools {
     delete(relativePath: string): Promise<{
         readonly path: string;
     }>;
+    /** List immediate entries; an omitted path or dot selects knowledge/. */
     list(relativePath?: string): Promise<readonly CuratorDirectoryEntry[]>;
     private walk;
     glob(pattern: string): Promise<readonly string[]>;

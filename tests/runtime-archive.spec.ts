@@ -15,6 +15,8 @@ import {
   archivePreviousGeneration,
   type ArchiveGenerationPhase,
 } from '../src/runtime.js'
+import { prepareCuratorSession, CURATOR_SESSION_PATH } from '../src/curator-session.js'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { RuntimeStore } from '../src/store.js'
 import { STATE_VERSION, type WorkerRecord } from '../src/types.js'
 import { initializeWorkspace } from '../src/workspace.js'
@@ -84,6 +86,10 @@ describe('runtime generation archive', () => {
     await store.writeWorker(previousWorker)
     await writeFile(path.join(root, '.alphasolve', 'curator', 'queue.json'), '{"version":1,"tasks":[]}\n')
 
+    await writeFile(path.join(root, 'problem.md'), 'Old problem.')
+    const curatorIdentity = await prepareCuratorSession(root, SessionId('old-session'))
+    await curatorIdentity.ready()
+
     let partialBackup = ''
     await expect(archivePreviousGeneration(root, 'new-problem-digest', {
       afterPhase: async (phase, backup) => {
@@ -97,6 +103,9 @@ describe('runtime generation archive', () => {
     })).rejects.toThrow(/simulated crash/)
 
     expect(partialBackup).not.toBe('')
+    expect(await existing(path.join(root, CURATOR_SESSION_PATH))).toBe(false)
+    expect(JSON.parse(await readFile(path.join(partialBackup, 'curator-session.json'), 'utf8')))
+      .toMatchObject({ sessionId: curatorIdentity.id })
     expect(await existing(statePath)).toBe(true)
     expect(await readdir(path.join(root, '.alphasolve', 'completions'))).toEqual([])
     expect(await readdir(path.join(root, '.alphasolve', 'workers'))).toEqual([])
@@ -134,6 +143,7 @@ describe('runtime generation archive', () => {
     ['completion', '.alphasolve/completions/bad.json'],
     ['worker', '.alphasolve/workers/bad.json'],
     ['curator queue', '.alphasolve/curator/queue.json'],
+    ['curator Session', CURATOR_SESSION_PATH],
   ])('fails closed before moving a corrupt %s document', async (_label, corruptRelative) => {
     const root = await mkdtemp(path.join(tmpdir(), 'dsh-alphasolve-corrupt-archive-'))
     roots.push(root)

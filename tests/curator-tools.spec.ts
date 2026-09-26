@@ -141,6 +141,53 @@ describe('curator knowledge tools', () => {
     await expect(tools.read('../problem.md')).rejects.toThrow(/parent component/)
   })
 
+  it('caps requested read ranges at EOF and reports the actual range', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'knowledge', 'short.md'), 'first\nsecond\nthird\n')
+    const tools = await CuratorKnowledgeTools.create(root, 'digest')
+
+    for (const endLine of [40, 60, 100]) {
+      await expect(tools.read('knowledge/short.md', { startLine: 1, endLine })).resolves.toEqual({
+        path: 'knowledge/short.md', content: 'first\nsecond\nthird\n',
+        startLine: 1, endLine: 3, totalLines: 3,
+      })
+    }
+    await expect(tools.read('knowledge/short.md', { startLine: 2, endLine: 100 })).resolves.toMatchObject({
+      content: 'second\nthird\n', startLine: 2, endLine: 3, totalLines: 3,
+    })
+    for (const range of [
+      { startLine: 0, endLine: 100 }, { startLine: 4, endLine: 100 },
+      { startLine: 2, endLine: 1 }, { startLine: 1, endLine: 1.5 },
+    ]) {
+      await expect(tools.read('knowledge/short.md', range)).rejects.toThrow(/invalid inclusive line range/)
+    }
+    await writeFile(path.join(root, 'knowledge', 'empty.md'), '')
+    await expect(tools.read('knowledge/empty.md')).resolves.toMatchObject({
+      content: '', startLine: 0, endLine: 0, totalLines: 0,
+    })
+    await expect(tools.read('knowledge/empty.md', { startLine: 1, endLine: 100 })).rejects.toThrow(/invalid inclusive line range/)
+  })
+
+  it('scopes dot discovery to knowledge without exposing the workspace root', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'problem.md'), 'private search marker')
+    await writeFile(path.join(root, 'knowledge', 'note.md'), 'visible search marker')
+    const tools = await CuratorKnowledgeTools.create(root, 'digest')
+
+    for (const discoveryPath of ['.', './', '.\\']) {
+      expect(await tools.list(discoveryPath)).toEqual(await tools.list('knowledge'))
+      expect(await tools.grep('search marker', { path: discoveryPath })).toEqual([
+        { path: 'knowledge/note.md', line: 1, text: 'visible search marker' },
+      ])
+    }
+    await expect(tools.list('../')).rejects.toThrow(/parent component/)
+    await expect(tools.grep('search marker', { path: '..' })).rejects.toThrow(/parent component/)
+    await expect(tools.read('index.md')).rejects.toThrow(/knowledge\/index\.md/)
+    await expect(tools.glob('**/*.md')).rejects.toThrow(/knowledge\/\*\*\/\*\.md/)
+    await expect(tools.write('problem.md', 'no')).rejects.toThrow(/workspace-relative path beginning with knowledge/)
+    await expect(readFile(path.join(root, 'problem.md'), 'utf8')).resolves.toBe('private search marker')
+  })
+
   it('preserves DSH read-before-write and stale-observation semantics', async () => {
     const root = await workspace()
     const file = path.join(root, 'knowledge', 'observed.md')
