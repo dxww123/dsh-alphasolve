@@ -1,21 +1,11 @@
 {
-  "compilerOptions": {
-    "target": "ES2024",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2024", "DOM"],
-    "types": ["node"],
-    "strict": true,
-    "noImplicitAny": true,
-    "exactOptionalPropertyTypes": true,
-    "noUncheckedIndexedAccess": true,
-    "allowImportingTsExtensions": true,
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "rootDir": "src",
-    "outDir": "lib/types",
-    "skipLibCheck": true
-  },
-  "include": ["src"]
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.host.json"
+    },
+    {
+      "path": "./tsconfig.client.json"
+    }
+  ]
 }

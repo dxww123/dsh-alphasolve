@@ -14,6 +14,8 @@ Workspace paths:
 - `knowledge/`: exploratory notes distilled from research traces. These notes are not established mathematics.
 - `unverified_propositions/`: private worker candidates. Do not inspect or manage another worker's live candidate.
 
+Use workspace-relative tool paths such as `problem.md`, without an absolute directory prefix. Discover existing files with `glob` rather than guessing list or index filenames. A missing optional hint or index means there is no input there; continue without retrying it.
+
 ## What A Worker Is
 
 `alphasolve_worker` is a proposition-producing workflow, not a general-purpose subagent. Every call starts:
@@ -28,7 +30,7 @@ Do not put output paths, tool permissions, pipeline-control instructions, Markdo
 
 ## Orchestration Loop
 
-1. **Orient.** Read `problem.md` and `hint.md`. Inspect `verified_propositions/index.md` and `knowledge/index.md` when present. When the workspace has multiple research files or is difficult to assess, call `alphasolve_research_review`.
+1. **Orient.** Read `problem.md`. Use `glob` to locate optional `hint.md` and the verified/knowledge indexes, then read those present. When the workspace has multiple research files or is difficult to assess, call `alphasolve_research_review`.
 2. **Plan.** Identify the best-supported global bottleneck and form two to four complementary next proposition targets. Prefer exact statements with explicit assumptions and success criteria.
 3. **Fill.** Dispatch specific proposition targets into available slots. Mix a main-line bridge or assembly target with a prerequisite, obstruction, alternative route, or free exploration target. When capacity is at least two and a slot is deliberately available, use one slot for a genuinely different or free direction before waiting.
 4. **Collect.** When capacity is full, active work is still useful, or no better target is ready, call `alphasolve_wait` with no arguments. It waits for at least one worker and returns every completion not delivered by a previous successful wait.

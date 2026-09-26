@@ -116,10 +116,15 @@ export interface GeneratorTaskInput {
 export function buildGeneratorTask(input: GeneratorTaskInput): string {
   const sections = ["# Problem", input.problem]
   if (input.hint) sections.push("# General Hint", input.hint)
-  if (input.instruction) sections.push("# Task Guidance", input.instruction)
+  if (input.instruction?.trim()) sections.push("# Task Guidance", input.instruction)
   sections.push(
+    "# Workspace",
+    "Tool paths are relative to the project root; the worker directory does not change the working directory.",
+    input.instruction?.trim()
+      ? `Worker guidance file: \`${input.workerRelativePath}/worker_hint.md\`. Its content is already included as Task Guidance above; no reread is needed.`
+      : "No worker guidance file is supplied.",
     "# Output",
-    `Create \`proposition.md\` directly in your own directory \`${input.workerRelativePath}\`. `
+    `Write exactly \`${input.workerRelativePath}/proposition.md\`. `
       + "It must contain exactly `## Statement` followed by `## Proof`, with no remarks or extra headings. "
       + "The Statement must be pure mathematics, without a theorem-like label. "
       + "Cite established propositions with `\\ref{path-without-extension}` relative to `verified_propositions/`, "

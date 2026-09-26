@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import SandboxProvider from '@deepseek-ai/dsh-sandbox'
+import SubprocessRuntime from '@deepseek-ai/dsh-subprocess'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 
-import { CALCULATOR_TOOL_NAME } from '../src/calculator.js'
+import { PYTHON_TOOL_NAME } from '../src/python-runtime.js'
 import { createCuratorKnowledgeTools } from '../src/curator-tools.js'
 import {
   AlphaSolveRoleService,
@@ -45,7 +47,7 @@ async function workspace(): Promise<string> {
 }
 
 afterEach(async () => {
-  contexts.splice(0)
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -113,6 +115,17 @@ async function toolContext(): Promise<Context> {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   return ctx
+}
+
+class UnusedSubprocess extends SubprocessRuntime {
+  override resolveExecutable(): never { throw new Error('Python must start lazily') }
+  override terminalEnvironment(): never { throw new Error('Python has no terminal') }
+  override spawn(): never { throw new Error('Python must start lazily') }
+  override spawnTerminal(): never { throw new Error('Python has no terminal') }
+}
+
+class UnusedSandbox extends SandboxProvider {
+  override confine(): never { throw new Error('Python must start lazily') }
 }
 
 describe('AlphaSolveRoleService workflow roles', () => {
@@ -188,18 +201,20 @@ describe('AlphaSolveRoleService workflow roles', () => {
     expect(calls[1]?.permissionPolicy.paths.some(rule => rule.root === path.join(root, 'knowledge'))).toBe(false)
   })
 
-  it('gives compute helpers only the calculator as a non-nesting scoped helper', async () => {
+  it.each(['compute', 'numerical_experiment'] as const)('gives %s one lazy Python tool without nested helpers or shell access', async type => {
     const root = await workspace()
     const calls: Parameters<RoleAgentRunner>[0][] = []
-    let calculatorNames: string[] = []
+    let pythonNames: string[] = []
     const helperCtx = await toolContext()
+    await helperCtx.plugin(UnusedSubprocess)
+    await helperCtx.plugin(UnusedSandbox)
     const runner: RoleAgentRunner = async options => {
       calls.push(options)
-      if (options.role === 'compute') {
+      if (options.role === type) {
         await options.setupHelpers?.(helperCtx, {} as Agent)
-        calculatorNames = helperCtx.tools.schemas().map(schema => schema.name)
+        pythonNames = helperCtx.tools.schemas().map(schema => schema.name)
       }
-      return completedRun(options, options.role === 'compute' ? '4' : undefined)
+      return completedRun(options, options.role === type ? '4' : undefined)
     }
     const service = new AlphaSolveRoleService({
       parent: mainAgent(), workspace: root, getConfig: () => config(), runner,
@@ -213,12 +228,14 @@ describe('AlphaSolveRoleService workflow roles', () => {
       signal: new AbortController().signal,
       callId: ToolCallId('compute-helper'),
       name: SUBAGENT_TOOL_NAME,
-      arguments: { type: 'compute', task: 'calculate 2+2' },
+      arguments: { type, task: 'calculate 2+2 with SymPy' },
     })
     expect(calculation.isError).toBe(false)
-    expect(calculatorNames).toEqual([CALCULATOR_TOOL_NAME])
-    expect(calls[1]?.permissionPolicy.allowedTools.has(CALCULATOR_TOOL_NAME)).toBe(true)
-    expect(calls[1]?.permissionPolicy.allowedTools.has(SUBAGENT_TOOL_NAME)).toBe(false)
+    expect(pythonNames).toEqual([PYTHON_TOOL_NAME])
+    expect(calls[1]?.permissionPolicy.allowedTools.has(PYTHON_TOOL_NAME)).toBe(true)
+    for (const denied of [SUBAGENT_TOOL_NAME, 'bash', 'run_code']) {
+      expect(calls[1]?.permissionPolicy.allowedTools.has(denied)).toBe(false)
+    }
   })
 
   it('throws a typed failure whenever a role Agent does not complete', async () => {
@@ -403,6 +420,38 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
     })
     expect(write.isError).toBe(false)
     await expect(readFile(path.join(root, 'knowledge', 'new-page.md'), 'utf8')).resolves.toBe('# New page\n')
+
+    const read = await childCtx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId('curator-read-long-range'),
+      name: CURATOR_TOOL_NAMES.read,
+      arguments: { path: 'knowledge/new-page.md', startLine: 1, endLine: 100 },
+    })
+    expect(read.isError).toBe(false)
+    expect(read.content).toMatchInlineSnapshot(`
+      [
+        {
+          "text": "{
+        "path": "knowledge/new-page.md",
+        "content": "# New page\\n",
+        "startLine": 1,
+        "endLine": 1,
+        "totalLines": 1
+      }",
+          "type": "text",
+        },
+      ]
+    `)
+
+    const list = await childCtx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId('curator-list-dot'),
+      name: CURATOR_TOOL_NAMES.list,
+      arguments: { path: '.' },
+    })
+    expect(list.isError).toBe(false)
+    expect(JSON.stringify(list.content)).toContain('knowledge/new-page.md')
+    expect(JSON.stringify(list.content)).not.toContain('problem.md')
 
     const deniedHelper = await childCtx.tools.execute({
       signal: new AbortController().signal,

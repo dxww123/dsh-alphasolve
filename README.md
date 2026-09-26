@@ -80,6 +80,44 @@ when prompted. Desktop owns its own plugin profile; a Web or Headless CLI
 installation does not install the plugin into Desktop. The CLI cannot modify
 the Desktop profile.
 
+## Python and SymPy
+
+From this plugin checkout, create the dedicated Python environment before starting a compute helper:
+
+```sh
+node scripts/setup-python.mjs
+```
+
+The setup script requires Python 3.10 or newer and installs SymPy 1.14.0 and mpmath 1.3.0 under `${DSH_HOME:-~/.dsh}/runtimes/alphasolve-python`. This virtual environment disables system site packages. The plugin uses `Scripts/python.exe` on Windows and `bin/python` on macOS/Linux. It checks that SymPy imports when starting a helper and reports missing dependencies without substituting an arithmetic calculator. The Harness profile must provide the `subprocess` and `sandbox` services when a compute helper starts.
+
+Both `compute` and `numerical_experiment` receive `alphasolve_python`. Each helper has a separate persistent Python process: imports, variables, functions, and exact SymPy objects survive its calls and disappear when the helper ends. A timeout, cancellation, or interpreter failure closes that process and the tool reports the reset; the next execution starts with a fresh namespace. Normal Python exceptions preserve the namespace. Successful results contain stdout, stderr, the final expression, truncation status, and SymPy's version. Print only the relevant values; code and output are bounded.
+
+Python runs with Harness's read-only process policy and an additional Python policy restricting reads to its runtime dependencies. Retrieve project inputs through the helper's permitted file tools and put the needed definitions into code. Python cannot write project files, read other worker drafts, start subprocesses, or use the network. The Windows Harness read-only backend reports partial enforcement. The Python audit and syntax policies add restrictions for mathematical workloads; they are not a strong sandbox for hostile code or native extensions. Only these two helper roles get the tool; ordinary workflow roles retain their existing tool permissions.
+
+To use another Python 3.10+ with SymPy 1.14.0 and mpmath 1.3.0 installed, set `python.executable` in the AlphaSolve plugin's deployment configuration. The other optional fields are `timeoutMs` (default `300000`), `maxOutputChars` (`65536`), `maxCodeChars` (`200000`), and `graceMs` (`1000`). These are positive integers no greater than `2147483647`; `maxOutputChars` must be at least `1024`. They belong to the plugin's Cordis configuration, not `.alphasolve/config.json` or model settings. For example, the plugin row may contain:
+
+```yaml
+name: '@dsh-external/dsh-alphasolve'
+config:
+  python:
+    executable: 'C:/Python/python.exe'
+    timeoutMs: 300000
+```
+
+Restart the Host after changing this deployment configuration. Existing mathematical Sessions and their stored transcripts are retained; Python memory is local to each live helper.
+
+The `@dsh-external/dsh-alphasolve/python` entry exports `PythonSession` and `resolvePythonOptions` for embedding the same managed interpreter with Harness subprocess and sandbox providers.
+
+## Inspect worker activity
+
+In Desktop or Web, open the main conversation and click **AlphaSolve** in its header. The right sidebar groups the work by worker, then verification round. Active workers and the current round expand automatically; completed workers and earlier rounds remain collapsible. Each role shows its status and model-request step count. Select **View transcript** to open that role's native Harness conversation, including its messages and tool calls. Completed roles remain readable after their Agents are disposed. Delegated helpers appear under the role that created them.
+
+A worker is a workflow, not a single subagent conversation. Its generator, verifier profiles, reviser, theorem checks, and supporting roles have separate Sessions. The ordinary left sidebar stays free of these role Sessions. Knowledge curation may continue after a worker finishes.
+
+The overview follows the workspace file watcher and reads the session-owned index at `.alphasolve/workflows/<main-session-id>.json`. It does not depend on `detailedTrace`. Keep this directory together with the workspace and retain Harness's Session storage: the index holds navigation and progress, while Harness stores the transcripts. Restoring AlphaSolve marks unfinished observations from its previous runtime as interrupted.
+
+This overview records role links created by version 0.3.0 and later. Earlier role transcripts are still stored by Harness but have no complete workflow index to reconstruct their grouping. After upgrading from a version without a client bundle, fully restart Desktop or the Web Host; a browser refresh alone is insufficient.
+
 ## Usage
 
 Place a non-empty UTF-8 `problem.md` in the terminal's starting directory or in
@@ -183,6 +221,14 @@ no shell, `run_code`, Web, or general subagent access. AlphaSolve tools, native
 presentation override, prompts, capacity state, and permissions belong only to
 the triggering session; other sessions in the same `dsh web` process do not
 gain them.
+
+## Role file discovery
+
+Standard file tools use paths relative to the session workspace, including inside worker roles. A generator receives the exact paths of its proposition and any worker hint. The task already contains the problem and available hints; optional files and indexes may be absent.
+
+`glob` accepts an omitted `path`, `.`, or a workspace-absolute search base. It searches the role's readable roots and checks every result, including symlink targets, before returning paths or UI metadata. Broad generator searches expose only that worker's draft; verifier discovery retains its restricted inputs. `read`, `write`, and `edit` require workspace-relative paths; `grep` requires an explicit readable file or directory, such as `knowledge`.
+
+Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep also accept `.` as the knowledge root. A curator read whose requested end line exceeds the file length stops at EOF and returns the actual line range.
 
 ## Development and validation
 

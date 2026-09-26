@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
+import type { RoleRunObservation } from './workflow-observation.js';
 import { type ContentBlock } from '@deepseek-ai/dsh-llm';
 import { SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session';
 import { type RoleKind, type RolePermissionPolicy } from './permissions.js';
@@ -51,6 +52,8 @@ export interface RunRoleAgentOptions {
     readonly setupHelpers?: RoleHelperSetup;
     /** Propagate nested-role activity to an owning role's inactivity watchdog. */
     readonly onActivity?: RoleActivityReporter;
+    /** Durable main-session overview for this actual role invocation. */
+    readonly observation?: RoleRunObservation;
     /** Internal diagnostic handoff used to persist partial traces on rejection. */
     readonly onFailure?: (failure: RoleRunFailure) => void;
     /** Technical bounds only; they do not impose a total worker wall-clock limit. */

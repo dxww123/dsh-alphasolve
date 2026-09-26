@@ -71,7 +71,25 @@ describe("workflow task builders", () => {
     expect(task).toContain("# Problem\n\nProve P.")
     expect(task).toContain("# General Hint\n\nTry parity.")
     expect(task).toContain("# Task Guidance\n\nIsolate the odd case.")
-    expect(task).toContain("`proposition.md`")
+    expect(task).toContain("Write exactly `unverified_propositions/prop-abcd1234/proposition.md`")
+    expect(task).toContain("Worker guidance file: `unverified_propositions/prop-abcd1234/worker_hint.md`")
+    expect(task).toContain("already included as Task Guidance above; no reread is needed")
+    expect(task).toContain("Tool paths are relative to the project root")
+  })
+
+  it.each([null, "", "   "])("does not send a generator to absent optional hint files (%j)", (instruction) => {
+    const task = buildGeneratorTask({
+      problem: "Prove P.",
+      instruction,
+      workerRelativePath: "unverified_propositions/prop-no-hint",
+    })
+    expect(task).not.toContain("# General Hint")
+    expect(task).not.toContain("# Task Guidance")
+    expect(task).not.toContain("worker_hint.md")
+    expect(task).toContain("No worker guidance file is supplied.")
+    expect(task).toContain("Write exactly `unverified_propositions/prop-no-hint/proposition.md`")
+    expect(ROLE_PROMPTS.generator).toContain("No General Hint section means no general hint is supplied")
+    expect(ORCHESTRATOR_PROMPT).toContain("locate optional `hint.md`")
   })
 
   it("adds external-year triage only to the citation verifier task", () => {

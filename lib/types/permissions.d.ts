@@ -69,7 +69,7 @@ export declare function canonicalizePotentialPath(candidate: string): Promise<st
 export declare function assertCanonicalContainment(policy: RolePermissionPolicy, requestedPath: string, access: PathAccess): Promise<CanonicalPathAccess>;
 export declare function isForbiddenRoleTool(name: string): boolean;
 /** Final synchronous policy boundary which later waterfall listeners cannot override. */
-export declare function createLexicalToolGuard(policy: RolePermissionPolicy): ToolGuard;
+export declare function createLexicalToolGuard(policy: RolePermissionPolicy, ownsScopedGlob?: (execution: ToolExecution) => boolean): ToolGuard;
 /**
  * Install both lexical and canonical checks into one Agent scope.
  *
@@ -77,5 +77,5 @@ export declare function createLexicalToolGuard(policy: RolePermissionPolicy): To
  * assertCanonicalContainment for each path they accept; only the five standard
  * DSH filesystem tools have a common argument contract here.
  */
-export declare function installRolePermissionBoundary(ctx: Context, policy: RolePermissionPolicy): () => void;
+export declare function installRolePermissionBoundary(ctx: Context, policy: RolePermissionPolicy, agent?: ToolExecution['agent']): () => void;
 //# sourceMappingURL=permissions.d.ts.map

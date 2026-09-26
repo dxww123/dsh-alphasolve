@@ -8,6 +8,8 @@ import {
   type ModelSelection,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import type { RoleRunObservation } from './workflow-observation.js'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   SessionId,
@@ -87,6 +89,8 @@ export interface RunRoleAgentOptions {
   readonly setupHelpers?: RoleHelperSetup
   /** Propagate nested-role activity to an owning role's inactivity watchdog. */
   readonly onActivity?: RoleActivityReporter
+  /** Durable main-session overview for this actual role invocation. */
+  readonly observation?: RoleRunObservation
   /** Internal diagnostic handoff used to persist partial traces on rejection. */
   readonly onFailure?: (failure: RoleRunFailure) => void
   /** Technical bounds only; they do not impose a total worker wall-clock limit. */
@@ -337,6 +341,10 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   const disposeTimeoutMs = technicalTimeout(options.disposeTimeoutMs, ROLE_DISPOSE_TIMEOUT_MS, 'disposeTimeoutMs')
 
   const childId = SessionId(randomUUID())
+  const descriptor = options.observation === undefined ? undefined : snapshotSubagentDescriptor({
+    mode: 'one-shot', provider: 'alphasolve', label: options.observation.label,
+  })
+  let descriptorAppended = false
   let hitMaxTurns = false
   let observedSteps = 0
   const observed: RoleOutput = { message: undefined, turnEnd: undefined }
@@ -376,7 +384,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
         text: options.persona,
       })
 
-      installRolePermissionBoundary(childCtx, options.permissionPolicy)
+      installRolePermissionBoundary(childCtx, options.permissionPolicy, child)
       const allowedInherited = options.allowedInheritedTools === undefined
         ? deriveInheritedAllowlist(childCtx, child, options.permissionPolicy)
         : [...options.allowedInheritedTools]
@@ -392,20 +400,26 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
         reportActivity()
         if (event.type === 'step/start') {
           observedSteps += 1
+          options.observation?.progress(String(child.id), observedSteps)
         }
         if (event.type === 'assistant/message') observed.message = event
         if (event.type === 'turn/end') observed.turnEnd = event
       })
 
       // Admission rejects the over-limit step before its model request starts.
-      childCtx.on('agent/pre-step', ({ agent }, next) => {
+      childCtx.on('agent/pre-step', async ({ agent }, next) => {
         reportActivity()
         if (observedSteps >= options.maxTurns) {
           hitMaxTurns = true
           agent.cancel({ kind: 'parent' })
           return Promise.resolve({ kind: 'reject' })
         }
-        return next()
+        const decision = await next()
+        if (!descriptorAppended && descriptor !== undefined && decision.kind === 'enter') {
+          agent.session.append('subagent/descriptor', descriptor)
+          descriptorAppended = true
+        }
+        return decision
       })
 
       await options.setupHelpers?.(childCtx, child, reportActivity)
@@ -437,7 +451,16 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   let primaryError: unknown
   let primaryPhase: RoleRunFailurePhase | undefined
   let cleanupError: unknown
+  let observationStarted = false
   try {
+    if (options.observation !== undefined) {
+      options.parent.session.append('subagent/catalog', {
+        version: 0, childId: child.id, childCreatedAt: child.session.header.createdAt,
+        mode: 'one-shot', label: options.observation.label,
+      })
+      await options.observation.started(child)
+      observationStarted = true
+    }
     const watchdog = inactivityWatchdog(inactivityTimeoutMs, () => {
       lifetime.abort(new RoleTechnicalTimeoutError('inactivity', inactivityTimeoutMs))
       child.cancel({ kind: 'parent' })
@@ -482,6 +505,22 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       }
     } catch (error) {
       cleanupError = error
+    }
+  }
+
+  if (observationStarted) {
+    const observationError = primaryError ?? cleanupError
+    try {
+      await options.observation?.finished(String(child.id),
+        observationError === undefined ? result?.stopReason ?? 'error' : externallyAborted ? 'aborted' : 'error',
+        hitMaxTurns ? options.maxTurns : observedSteps,
+        observationError === undefined ? undefined : observationError instanceof Error ? observationError.message : String(observationError))
+    } catch (error) {
+      try {
+        options.parent.ctx.logger.warn(`AlphaSolve role overview could not settle: ${error instanceof Error ? error.message : String(error)}`)
+      } catch (_diagnosticError) {
+        // Overview diagnostics must not replace the role's operational outcome.
+      }
     }
   }
 

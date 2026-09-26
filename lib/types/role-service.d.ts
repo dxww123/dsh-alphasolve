@@ -1,6 +1,7 @@
 /** Production bridge from the fixed AlphaSolve workflow to fresh DSH role Agents. */
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
+import { type PythonOptions } from './python-runtime.js';
 import type { CuratorRunner } from './curator.js';
 import type { CuratorKnowledgeTools } from './curator-tools.js';
 import { type RoleKind } from './permissions.js';
@@ -8,6 +9,7 @@ import { type RoleRunFailure, type RoleRunFailurePhase, type RoleRunResult, type
 import { type ResearchReviewTools } from './research-tools.js';
 import type { AlphaSolveConfig } from './types.js';
 import type { PropositionFilenameBuilder, RoleInvocation, RoleInvocationResult, RoleInvoker, WorkflowRole } from './workflow.js';
+import type { AlphaSolveWorkflowObserver } from './workflow-observation.js';
 export declare const SUBAGENT_TOOL_NAME = "alphasolve_subagent";
 export declare const CURATOR_TOOL_NAMES: Readonly<{
     readonly read: "alphasolve_curator_read";
@@ -57,6 +59,10 @@ export interface AlphaSolveRoleServiceOptions {
     readonly onTrace?: RoleTraceHandler;
     /** Test seam; production uses runRoleAgent. */
     readonly runner?: RoleAgentRunner;
+    /** Persistent desktop overview independent of optional detailed traces. */
+    readonly observer?: AlphaSolveWorkflowObserver;
+    /** Deployment-owned interpreter and execution budgets. */
+    readonly python?: PythonOptions;
 }
 export interface ResearchReviewRequest {
     readonly signal: AbortSignal;
@@ -78,8 +84,11 @@ export declare class AlphaSolveRoleService implements RoleInvoker {
     private readonly getConfig;
     private readonly onTrace;
     private readonly runner;
+    private readonly observer;
+    private readonly python;
     private readonly workerArtifactPaths;
     constructor(options: AlphaSolveRoleServiceOptions);
+    private observe;
     private inheritedModelSelection;
     private modelSelection;
     private runWithTrace;

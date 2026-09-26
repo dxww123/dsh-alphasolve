@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +11,11 @@ import { fileURLToPath } from 'node:url'
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const packageRequire = createRequire(import.meta.url)
 const timeoutMs = 120_000
+const pythonExecutable = process.env.ALPHASOLVE_TEST_PYTHON?.trim() || path.join(
+  path.resolve(process.env.DSH_HOME?.trim() || path.join(homedir(), '.dsh')),
+  'runtimes', 'alphasolve-python', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+)
+assert.ok(path.isAbsolute(pythonExecutable), 'ALPHASOLVE_TEST_PYTHON must name an absolute dedicated Python executable')
 const pnpmCli = process.env.npm_execpath
 if (pnpmCli === undefined || !/[\\/]pnpm\.(?:c?js|mjs)$/.test(pnpmCli)) {
   throw new Error('Run this smoke through pnpm run test:packed so the installed pnpm CLI is available.')
@@ -146,7 +151,7 @@ try {
   // The plugin and owned dependencies are installed tarballs. Harness peers use
   // the current checkout's real built exports and existing dependency graph.
   const harnessDependencies = {}
-  for (const name of [...Object.keys(sourceManifest.peerDependencies), '@deepseek-ai/cordis-plugin-loader']) {
+  for (const name of [...Object.keys(sourceManifest.peerDependencies), '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/dsh-subprocess-local', '@deepseek-ai/dsh-sandbox-local']) {
     const directory = await packageDirectory(name)
     const manifest = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'))
     if (sourceManifest.peerDependencies[name] !== undefined) {
@@ -188,6 +193,9 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
+import LocalSandbox from '@deepseek-ai/dsh-sandbox-local'
+import { PythonSession, resolvePythonOptions } from '${sourceManifest.name}/python'
 import * as plugin from '${sourceManifest.name}'
 
 const consumer = ${JSON.stringify(consumer)}
@@ -210,7 +218,8 @@ const schemasteryManifest = JSON.parse(await readFile(schemasteryManifestPath, '
 assert.equal(schemasteryManifest.version, pluginManifest.dependencies['@deepseek-ai/schemastery'])
 assert.equal(plugin.name, 'dsh-alphasolve')
 assert.equal(typeof plugin.apply, 'function')
-assert.deepEqual(plugin.Config({}), { defaultCapacity: 2, defaultDetailedTrace: true })
+assert.equal(plugin.Config({}).defaultCapacity, 2)
+assert.equal(plugin.Config({}).defaultDetailedTrace, true)
 assert.throws(() => plugin.Config({ defaultCapacity: 0 }), /defaultCapacity expected number >= 1/)
 
 const ctx = new Context()
@@ -219,6 +228,8 @@ try {
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(LocalSubprocess)
+  await ctx.plugin(LocalSandbox)
   await ctx.plugin(Loader, { baseUrl: pathToFileURL(consumer + path.sep).href })
   const before = await ctx.systemPrompt.assemble()
   const id = await ctx.loader.create({ name: '${sourceManifest.name}' })
@@ -226,12 +237,30 @@ try {
   assert.equal(ctx.loader.resolve(id).fiber?.state, 2, 'Loader did not activate the packed plugin')
   assert.deepEqual(ctx.tools.schemas(), [], 'Dormant AlphaSolve must not expose global tools')
   assert.deepEqual(await ctx.systemPrompt.assemble(), before, 'Dormant AlphaSolve must not change the global prompt')
+  const pythonOptions = resolvePythonOptions({ executable: ${JSON.stringify(pythonExecutable)}, timeoutMs: 30_000 })
+  const python = new PythonSession(ctx.subprocess, ctx.sandbox, pythonOptions)
+  const independent = new PythonSession(ctx.subprocess, ctx.sandbox, pythonOptions)
+  const pythonSignal = new AbortController().signal
+  try {
+    const factorization = await python.execute(["x = sp.symbols('x')", "sp.factor(x**4 - 1)"].join('\\n'), pythonSignal)
+    assert.equal(factorization.result, '(x - 1)*(x + 1)*(x**2 + 1)')
+    assert.equal(factorization.sympyVersion, '1.14.0')
+    assert.equal(factorization.truncated, false)
+    const retained = await python.execute('sp.expand((x + 1)**3)', pythonSignal)
+    assert.equal(retained.result, 'x**3 + 3*x**2 + 3*x + 1', 'Python variables must survive between calls')
+    await assert.rejects(independent.execute('x', pythonSignal), /NameError/, 'Python helpers must not share variables')
+    const recovered = await independent.execute('sp.Rational(1, 3) + sp.Rational(1, 6)', pythonSignal)
+    assert.equal(recovered.result, '1/2', 'Ordinary Python errors must leave the interpreter usable')
+    console.log('python-sympy-smoke-ok; SymPy ' + factorization.sympyVersion)
+  } finally {
+    await Promise.all([python.dispose(), independent.dispose()])
+  }
 } finally {
   await ctx.fiber.dispose()
 }
 `)
   await run([probePath], { cwd: consumer, env })
-  console.log('packed-install-ok (real Harness peers, isolated plugin dependencies)')
+  console.log('packed-install-ok (real Harness peers, isolated plugin dependencies, confined SymPy execution)')
 } finally {
   await unlinkInstalledLinks(temporaryRoot)
   await rm(temporaryRoot, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 })

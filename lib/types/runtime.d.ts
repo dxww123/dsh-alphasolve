@@ -1,5 +1,6 @@
 /** Session-owned AlphaSolve runtime: durable state, workers, tools, and teardown. */
 import { type Agent } from '@deepseek-ai/dsh-agent';
+import type { PythonOptions } from './python-runtime.js';
 import { type RoleTraceEvent } from './role-service.js';
 import { RuntimeStore } from './store.js';
 import { type ActivateResult } from './types.js';
@@ -25,6 +26,8 @@ export declare function shouldEnqueueCuratorTrace(event: Pick<RoleTraceEvent, 'p
 export interface AlphaSolveRuntimeDefaults {
     readonly defaultCapacity?: number;
     readonly defaultDetailedTrace?: boolean;
+    /** Deployment-owned Python execution settings. */
+    readonly python?: PythonOptions;
 }
 export interface RuntimeActivationRequest {
     readonly capacity?: number;

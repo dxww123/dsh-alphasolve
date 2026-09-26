@@ -35,6 +35,7 @@ import {
   VERIFIED_SUBDIRECTORY_PATH_PATTERN,
 } from './project-tools.js'
 import { ORCHESTRATOR_PROMPT } from './prompts.js'
+import type { PythonOptions } from './python-runtime.js'
 import {
   AlphaSolveRoleService,
   type RoleTraceEvent,
@@ -49,6 +50,7 @@ import {
 } from './types.js'
 import { WorkerManager } from './worker-manager.js'
 import { createFixedWorkerExecutor } from './workflow.js'
+import { AlphaSolveWorkflowObserver } from './workflow-observation.js'
 import {
   backupSolution,
   canonicalWorkspace,
@@ -98,6 +100,8 @@ export function shouldEnqueueCuratorTrace(
 export interface AlphaSolveRuntimeDefaults {
   readonly defaultCapacity?: number
   readonly defaultDetailedTrace?: boolean
+  /** Deployment-owned Python execution settings. */
+  readonly python?: PythonOptions
 }
 
 export interface RuntimeActivationRequest {
@@ -567,7 +571,13 @@ export class AlphaSolveRuntime {
       })
       throwIfActivationCancelled(signal)
 
+      const observer = await AlphaSolveWorkflowObserver.open(snapshot.root, String(agent.id), error => {
+        agent.ctx.logger.warn(`AlphaSolve workflow overview write failed: ${errorMessage(error)}`)
+      })
+      for (const worker of await store.validateWorkers()) await observer.worker(worker)
       const roleService = new AlphaSolveRoleService({
+        observer,
+        ...(defaults.python === undefined ? {} : { python: defaults.python }),
         parent: agent,
         workspace: snapshot.root,
         getConfig: () => ({
@@ -646,6 +656,7 @@ export class AlphaSolveRuntime {
         async () => {
           await curator?.stop()
         },
+        record => observer.worker(record),
       )
       runtime = new AlphaSolveRuntime(
         agent,
@@ -756,7 +767,7 @@ export class AlphaSolveRuntime {
       workspace: this.workspace,
       extraAllowedTools: [...customNames, ...allowedInherited],
     })
-    installRolePermissionBoundary(ctx, policy)
+    installRolePermissionBoundary(ctx, policy, this.agent)
     ctx.tools.restrict({ allow: allowedInherited })
     ctx.systemPrompt.section({
       name: 'alphasolve:orchestrator',

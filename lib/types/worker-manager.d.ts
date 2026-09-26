@@ -49,6 +49,7 @@ export declare class WorkerManager {
     private readonly onBackgroundError;
     private readonly assertRuntimeOwned;
     private readonly onSolution;
+    private readonly onWorkerChanged;
     private readonly active;
     private readonly activeRecords;
     private readonly notifier;
@@ -59,7 +60,8 @@ export declare class WorkerManager {
     private solutionDrainGate;
     private stopStatus;
     private problemNoticeSent;
-    constructor(store: RuntimeStore, executeWorkflow: WorkerExecutor, onHintChanged: (message: string) => void, onBackgroundError?: (error: unknown) => void, assertRuntimeOwned?: () => Promise<void>, onSolution?: () => Promise<void>);
+    constructor(store: RuntimeStore, executeWorkflow: WorkerExecutor, onHintChanged: (message: string) => void, onBackgroundError?: (error: unknown) => void, assertRuntimeOwned?: () => Promise<void>, onSolution?: () => Promise<void>, onWorkerChanged?: (record: WorkerRecord) => Promise<void>);
+    private reportWorkerChanged;
     /** Current active worker IDs in start order. */
     activeIds(): string[];
     /** Synchronous model/UI summary updated at every durable phase boundary. */
