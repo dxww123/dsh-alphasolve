@@ -13,11 +13,11 @@ DeepSeek Harness。插件安装后默认休眠；只有用户明确提到 `Alpha
 
 ```text
 branch: master
-commit: 477b4f420553e8a52c2fbccc464d7561b239c443
-package version: 0.1.7-rc.2
+commit: 4878cdabd87d4041bdaff61d04c966883b9fd07a
+package version: 0.2.0-rc.1
 ```
 
-插件要求 DSH `0.1.7-rc.2`、Cordis `4.0.4`、声明式 Agent preset、Session 投影和当前的 Agent 创建生命周期。不支持更早的 Harness 版本。
+插件要求 DSH `0.2.0-rc.1`、Cordis `4.0.4`、声明式 Agent preset、Session 投影和当前的 Agent 创建生命周期。不支持更早的 Harness 版本。
 
 ## 安装
 
@@ -27,7 +27,7 @@ package version: 0.1.7-rc.2
 ```sh
 cd /path/to/deepseek-harness
 git fetch origin
-git switch --detach 477b4f4205
+git switch --detach 4878cdabd8
 pnpm install
 pnpm run build
 ```
@@ -60,7 +60,7 @@ dsh --profile web --dump-config
 dsh --profile headless --dump-config
 ```
 
-`dsh --version` 应输出 `0.1.7-rc.2`，两份依赖列表都应显示
+`dsh --version` 应输出 `0.2.0-rc.1`，两份依赖列表都应显示
 `@dsh-external/dsh-alphasolve`，两份 config dump 都应恰好包含一条
 `dsh-alphasolve`。Headless profile 必须使用当前的 `base + headless` 组合，不能包含
 Web bundle。自定义 profile 需要单独安装插件。安装或升级后应重新启动正在运行的
@@ -68,7 +68,7 @@ Web bundle。自定义 profile 需要单独安装插件。安装或升级后应�
 
 ## 桌面端安装
 
-使用 DeepSeek Harness Desktop `0.1.7-rc.2`。先在此仓库运行 `pnpm run build`，再运行 `pnpm pack` 生成安装包，通过桌面端的插件管理器安装该本地包，并按提示重启 Host。桌面端拥有独立的插件 profile；通过 CLI 安装到 Web 或 Headless 不会安装到桌面端。CLI 不能修改 Desktop profile。
+使用 DeepSeek Harness Desktop `0.2.0-rc.1`。先在此仓库运行 `pnpm run build`，再运行 `pnpm pack` 生成安装包，通过桌面端的插件管理器安装该本地包，并按提示重启 Host。桌面端拥有独立的插件 profile；通过 CLI 安装到 Web 或 Headless 不会安装到桌面端。CLI 不能修改 Desktop profile。
 
 ## Python 与 SymPy
 

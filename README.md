@@ -14,11 +14,11 @@ This version targets the following DSH release and source revision:
 
 ```text
 branch: master
-commit: 477b4f420553e8a52c2fbccc464d7561b239c443
-package version: 0.1.7-rc.2
+commit: 4878cdabd87d4041bdaff61d04c966883b9fd07a
+package version: 0.2.0-rc.1
 ```
 
-The plugin requires DSH `0.1.7-rc.2`, Cordis `4.0.4`, declarative Agent presets,
+The plugin requires DSH `0.2.0-rc.1`, Cordis `4.0.4`, declarative Agent presets,
 Session projections, and the current Agent creation lifecycle. Older Harness
 releases are unsupported.
 
@@ -30,7 +30,7 @@ For a source checkout, build that exact revision with:
 ```sh
 cd /path/to/deepseek-harness
 git fetch origin
-git switch --detach 477b4f4205
+git switch --detach 4878cdabd8
 pnpm install
 pnpm run build
 ```
@@ -63,7 +63,7 @@ dsh --profile web --dump-config
 dsh --profile headless --dump-config
 ```
 
-`dsh --version` should report `0.1.7-rc.2`; both dependency lists should show
+`dsh --version` should report `0.2.0-rc.1`; both dependency lists should show
 `@dsh-external/dsh-alphasolve`; and each config dump should contain exactly one
 `dsh-alphasolve` row. The Headless profile must use the current
 `base + headless` composition, without the Web bundle. Install the plugin
@@ -73,7 +73,7 @@ does not load new code.
 
 ## Desktop installation
 
-Use DeepSeek Harness Desktop `0.1.7-rc.2`. Build this checkout with
+Use DeepSeek Harness Desktop `0.2.0-rc.1`. Build this checkout with
 `pnpm run build`, create a tarball with `pnpm pack`, and install that local
 package through the desktop application's Plugin Manager. Restart the Host
 when prompted. Desktop owns its own plugin profile; a Web or Headless CLI

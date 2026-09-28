@@ -1,7 +1,7 @@
 # Compatibility
 
-The current implementation targets DSH `0.1.7-rc.2`, source commit
-`477b4f420553e8a52c2fbccc464d7561b239c443` on `master`,
+The current implementation targets DSH `0.2.0-rc.1`, source commit
+`4878cdabd87d4041bdaff61d04c966883b9fd07a` on `master`,
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
@@ -20,7 +20,7 @@ and AlphaSolve `main` commit
 - Migration validation platform: Windows.
 - Additional design targets: macOS and Linux. Path validation understands both
   POSIX and Windows spellings even when running on the other platform.
-- DSH surfaces: the one-shot `headless` profile and long-lived `web` profile and Desktop `0.1.7-rc.2`,
+- DSH surfaces: the one-shot `headless` profile and long-lived `web` profile and Desktop `0.2.0-rc.1`,
   plus custom profiles into which this package is explicitly installed.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
