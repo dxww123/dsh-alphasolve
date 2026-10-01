@@ -6,8 +6,6 @@ AlphaSolve helps you work on difficult mathematics problems in [DeepSeek Harness
 
 ## Install
 
-> npm publication is pending account verification. The short-name installation below becomes available after publication.
-
 1. Install **DeepSeek Harness Desktop 0.2.0-rc.2** and configure a working model connection.
 2. Open the plugin manager, choose **Add plugin**, enter **`dsh-alphasolve`**, and install. Choose **Enable now** and restart if prompted.
 3. Complete the [one-time Python/SymPy setup](docs/python-setup.md). Desktop includes Python, but installing the plugin does **not** install SymPy.
@@ -26,4 +24,4 @@ Click **AlphaSolve** at the top of the conversation to see progress and open eac
 
 Start with a small problem. Repeated checking can take a long time and incur substantial model charges; the default is two parallel solving tasks. Automated checks do not guarantee a correct proof—review the mathematics yourself.
 
-[Advanced usage and development](docs/advanced.md) · [Compatibility](COMPATIBILITY.md) · [Report a problem](https://github.com/dxww123/dsh-alphasolve/issues)
+[npm package](https://www.npmjs.com/package/dsh-alphasolve) · [Advanced usage and development](docs/advanced.md) · [Compatibility](COMPATIBILITY.md) · [Report a problem](https://github.com/dxww123/dsh-alphasolve/issues)
