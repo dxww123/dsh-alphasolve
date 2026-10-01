@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-alphasolve",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Session-scoped AlphaSolve workflow for DeepSeek Harness",
   "type": "module",
   "private": true,
@@ -89,18 +89,18 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
-    "@deepseek-ai/dsh-agent": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-llm": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-session": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-session-projection": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-subagent": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-tools": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-sandbox": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-subprocess": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-session-persistence": "0.2.0-rc.1"
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.2.0-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent-preset-registry": {
