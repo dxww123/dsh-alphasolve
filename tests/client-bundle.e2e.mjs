@@ -13,7 +13,7 @@ runInNewContext(await readFile(new URL('../lib/client.js', import.meta.url), 'ut
 }, { timeout: 1000 })
 assert.equal(registrations.length, 1)
 const registration = registrations[0]
-assert.equal(registration.id, '@dsh-external/dsh-alphasolve')
+assert.equal(registration.id, 'dsh-alphasolve')
 assert.equal(typeof registration.factory, 'function')
 
 // Rendering is covered by client-workflow.spec.ts. This facade checks that

@@ -1,9 +1,8 @@
 {
-  "name": "@dsh-external/dsh-alphasolve",
-  "version": "0.3.2",
+  "name": "dsh-alphasolve",
+  "version": "0.4.0",
   "description": "Session-scoped AlphaSolve workflow for DeepSeek Harness",
   "type": "module",
-  "private": true,
   "packageManager": "pnpm@11.7.0",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -39,7 +38,8 @@
     "src/**/*.tsx",
     "python/*.py",
     "scripts/setup-python.mjs",
-    "lib/python.js"
+    "lib/python.js",
+    "docs/**/*.md"
   ],
   "scripts": {
     "build": "tsc -b && tsdown",
@@ -162,5 +162,9 @@
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

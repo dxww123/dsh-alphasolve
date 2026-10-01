@@ -3,4 +3,4 @@
 # human request explicitly asks to solve problem.md with AlphaSolve.
 - insert:
     - id: dsh-alphasolve
-      name: '@dsh-external/dsh-alphasolve'
+      name: 'dsh-alphasolve'
