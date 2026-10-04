@@ -6,11 +6,13 @@
 
 ## 安装
 
+以下 npm 安装步骤适用于已发布的 `dsh-alphasolve@0.4.0` 和 DSH `0.2.0-rc.2`。当前源码面向 DSH `0.2.1-alpha.1`，相关改动尚未发布到 npm；使用该版本时，请[从源码构建并本地安装](docs/advanced.zh-CN.md#开发与验证)。
+
 1. 安装 **DeepSeek Harness 官方桌面端 0.2.0-rc.2**，配置好可用的模型。
 2. 在插件管理中选择「添加插件」，输入 **`dsh-alphasolve`** 并安装，选择「立即启用」，按提示重启。
 3. 按照[首次计算环境准备](docs/python-setup.zh-CN.md)配置 Python/SymPy。桌面端自带 Python，但安装插件**不会自动安装 SymPy**。
 
-不需要 GitHub 账号，也不需要下载源码、自己编译。已安装旧包 `@dsh-external/dsh-alphasolve` 的用户，请先按[升级说明](docs/advanced.zh-CN.md#从-github-旧包升级)替换旧包。
+npm 安装不需要 GitHub 账号，也不需要下载源码、自己编译。已安装旧包 `@dsh-external/dsh-alphasolve` 的用户，请先按[升级说明](docs/advanced.zh-CN.md#从-github-旧包升级)替换旧包。
 
 ## 开始求解
 

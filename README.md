@@ -6,11 +6,13 @@ AlphaSolve helps you work on difficult mathematics problems in [DeepSeek Harness
 
 ## Install
 
+These npm instructions apply to published `dsh-alphasolve@0.4.0` and DSH `0.2.0-rc.2`. The current source checkout targets DSH `0.2.1-alpha.1`; those changes are not yet published to npm. For that version, [build from source and install locally](docs/advanced.md#development-and-validation).
+
 1. Install **DeepSeek Harness Desktop 0.2.0-rc.2** and configure a working model connection.
 2. Open the plugin manager, choose **Add plugin**, enter **`dsh-alphasolve`**, and install. Choose **Enable now** and restart if prompted.
 3. Complete the [one-time Python/SymPy setup](docs/python-setup.md). Desktop includes Python, but installing the plugin does **not** install SymPy.
 
-No GitHub account or source build is needed. If you have the older `@dsh-external/dsh-alphasolve` package, [replace it before installing this one](docs/advanced.md#upgrading-from-the-github-package).
+The npm installation needs no GitHub account or source build. If you have the older `@dsh-external/dsh-alphasolve` package, [replace it before installing this one](docs/advanced.md#upgrading-from-the-github-package).
 
 ## Solve a problem
 

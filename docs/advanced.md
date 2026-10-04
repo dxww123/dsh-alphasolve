@@ -10,7 +10,8 @@ Version 0.4.0 uses the npm package name `dsh-alphasolve`. If an earlier GitHub i
 
 ## CLI installation
 
-Use DSH 0.2.0-rc.2. Install into each profile you use:
+The published npm package `dsh-alphasolve@0.4.0` requires DSH `0.2.0-rc.2`.
+Install it into each profile you use:
 
 ```sh
 dsh plugin --profile web add dsh-alphasolve
@@ -21,7 +22,7 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-For a local checkout, replace the package name with `.` after building it. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.1-alpha.1`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
 ## Python and SymPy
 
@@ -176,25 +177,33 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 
 ## Development and validation
 
-Keep this checkout next to the matching `deepseek-harness` checkout. Development
+Keep this checkout next to a `deepseek-harness` checkout at tag
+`dsh-v0.2.1-alpha.1` (commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`). Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
-Install and build Harness before compiling AlphaSolve or running the packed
-installation probe.
+In the Harness checkout, run `pnpm install --frozen-lockfile` and
+`pnpm run build:lib` before compiling AlphaSolve or running the packed
+installation probe. Then run these commands in the AlphaSolve checkout:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm run typecheck
+pnpm run build
 pnpm test
 pnpm run test:packed
 ```
+
+To install the built checkout into a matching DSH Web profile, run
+`dsh plugin --profile web add .` from this directory, then restart the Web Host.
+For Headless, replace `web` with `headless`.
 
 The packed installation probe loads the tarball through the real Cordis Loader
 and current Harness services in an isolated temporary consumer. It does not
 make a model request. Model-backed mathematical quality and a desktop UI run
 require separate verification with the configured model provider.
 
-On Windows, validate against an installed desktop without changing its profile:
+On Windows, validate against an installed Desktop of the matching DSH version
+without changing its profile:
 
 ```sh
 pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"
