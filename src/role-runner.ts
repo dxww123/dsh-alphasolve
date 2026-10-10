@@ -10,7 +10,11 @@ import {
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import { foldSubagentDescriptor, snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import {
+  foldSubagentDescriptor,
+  SUBAGENT_DESCRIPTOR_VERSION,
+  type OneShotSubagentDescriptorData,
+} from '@deepseek-ai/dsh-subagent'
 import type { RoleRunObservation } from './workflow-observation.js'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
@@ -357,12 +361,13 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
   }
   const childId = options.session?.id ?? SessionId(randomUUID())
   // Only the curator queue can rebuild task-local tools; generic subagent continuation must stay disabled.
-  const descriptor = options.observation === undefined && options.session === undefined
+  const descriptor: OneShotSubagentDescriptorData | undefined = options.observation === undefined && options.session === undefined
     ? undefined
-    : snapshotSubagentDescriptor({
+    : {
+        version: SUBAGENT_DESCRIPTOR_VERSION,
         mode: 'one-shot', provider: 'alphasolve',
         label: options.observation?.label ?? `AlphaSolve · ${options.role}`,
-      })
+      }
   let descriptorAppended = false
   let hitMaxTurns = false
   let observedSteps = 0

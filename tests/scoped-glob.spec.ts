@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -35,12 +36,15 @@ async function fixture(role: 'generator' | 'verifier_citation' = 'generator', cu
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(LocalSubprocessRuntime)
+  provideWorkingDirectoryFixture(ctx, cwd)
   await ctx.plugin(ToolFsSearch, { sampleOverCapGlobResults: true })
   const agent = { session: { header: { id: 'scoped-glob', cwd } } } as Agent
   let scope!: Scope
   await ctx.plugin(Object.assign((inner: Context) => { scope = createScope(inner, agent) }, { inject: ['tools', 'systemPrompt'] }))
   scope.ctx.tools.presentAs('native')
   const original = ctx.tools.get('glob', agent)
+  expect(original, 'native glob must be registered before installing the role boundary').toBeDefined()
+  expect(ctx.tools.get('grep', agent), 'native grep must be registered').toBeDefined()
   const basePolicy = createRolePolicy(role, { workspace: cwd, workerDirectory: 'unverified_propositions/worker-a', propositionFile: 'unverified_propositions/worker-a/proposition.md' })
   const dispose = installRolePermissionBoundary(scope.ctx, customize?.(basePolicy) ?? basePolicy, agent)
   let counter = 0

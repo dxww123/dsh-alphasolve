@@ -22,7 +22,7 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.1-alpha.1`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.1-alpha.2`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
 ## Python and SymPy
 
@@ -178,7 +178,7 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at tag
-`dsh-v0.2.1-alpha.1` (commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`). Development
+`dsh-v0.2.1-alpha.2` (commit `d743267388641bc76f17c45ce8b4c231aed1d32c`). Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and

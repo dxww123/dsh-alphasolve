@@ -53,9 +53,10 @@ class CompletingAdapter extends LlmAdapter {
 async function harness(root: string, adapter: LlmAdapter): Promise<{ ctx: Context; parent: Agent }> {
   const ctx = new Context()
   contexts.push(ctx)
-  await mountAgentLoopTestDependencies(ctx)
+  await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(Subagents)
+  expect(ctx.get('subagents')).toBeDefined()
   ctx.llm.registerAdapter(['fixture'], adapter)
   const parent = (await ctx.agents.create({ sessionId: SessionId('main'), meta: { cwd: root },
     agentOptions: { provider: 'fixture', model: 'fixture' } })).agent

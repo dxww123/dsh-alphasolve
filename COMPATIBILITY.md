@@ -1,15 +1,24 @@
 # Compatibility
 
-The current source checkout targets DSH `0.2.1-alpha.1`, source commit
-`5badb15009ae1756c3afe0ae0cef1faafc290ccc` (tag `dsh-v0.2.1-alpha.1`),
+The current source checkout targets DSH `0.2.1-alpha.2`, source commit
+`d743267388641bc76f17c45ce8b4c231aed1d32c` (tag `dsh-v0.2.1-alpha.2`),
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
 
 The published npm package `dsh-alphasolve@0.4.0` targets DSH `0.2.0-rc.2`.
 The updated peer requirements in this checkout have not been published to npm;
-for DSH `0.2.1-alpha.1`, build this checkout and install it locally using the
+for DSH `0.2.1-alpha.2`, build this checkout and install it locally using the
 [development instructions](docs/advanced.md#development-and-validation).
+
+Validated on Windows on 2026-10-10: Harness library and Web production builds,
+AlphaSolve typecheck and build, 283 passing tests with 4 existing platform skips,
+the client bundle check, and an isolated packed installation using the current
+Harness peers, real Cordis Loader, and confined SymPy execution. Real Headless
+and Web profiles loaded the plugin; a local deterministic model stub verified
+activation and cross-process Session restoration, and Web authentication reached
+the built homepage. Live-model mathematical quality, interactive browser behavior,
+and installed Desktop `0.2.1-alpha.2` were not tested.
 
 - Runtime: Node.js `^22.19.0` or `>=24.0.0`.
 - Package manager used for development: pnpm 11.
@@ -28,7 +37,7 @@ for DSH `0.2.1-alpha.1`, build this checkout and install it locally using the
 - DSH surfaces: the one-shot `headless` profile, long-lived `web` profile,
   Desktop, and custom profiles into which this package is explicitly installed.
   The previous installed-Desktop probe covered `0.2.0-rc.2`; Desktop
-  `0.2.1-alpha.1` has not been validated here.
+  `0.2.1-alpha.2` has not been validated here.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
 - DSH Agent presets: `standard`, `cordis`, and `ptc` are supported. The plugin
@@ -52,6 +61,8 @@ for DSH `0.2.1-alpha.1`, build this checkout and install it locally using the
   reopens the same Session with `agents.resume`, rebuilding the task's scoped
   tools on every invocation. Native subagent descriptors remain read-only
   (`one-shot`): generic subagent continuation cannot reconstruct these tools.
+  The plugin writes the supported versioned one-shot descriptor directly;
+  Harness's descriptor factory now accepts only continuable children.
 - AlphaSolve semantics: ordinary orchestrator/worker flow from local
   `main@a336b850`; MCTS is intentionally out of scope.
 
@@ -64,7 +75,7 @@ not being the final answer. DSH-specific session isolation, durable wait
 delivery, problem digests, two-phase promotion, and atomic winner publication
 are retained as safety extensions.
 
-This checkout pins DSH peers to `0.2.1-alpha.1` and Cordis to `4.0.5-alpha.1`,
+This checkout pins DSH peers to `0.2.1-alpha.2` and Cordis to `4.0.5-alpha.1`,
 and does not contain older API adapters. Session restoration runs in the
 awaited `agent/created` hook.
 AlphaSolve registers a Session projection for activation authorization and

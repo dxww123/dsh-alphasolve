@@ -21,7 +21,7 @@ dsh plugin --profile headless add dsh-alphasolve
 
 Desktop 有独立的 profile。使用图形界面中的插件管理器，或完全退出 Desktop 后使用其自带命令运行 `dsh plugin --profile desktop add dsh-alphasolve`；通过 npm 安装的 DSH 命令不能管理该 profile。
 
-当前源码面向 DSH `0.2.1-alpha.1`，更新后的 peer 版本要求尚未发布到 npm。使用该版本时，先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
+当前源码面向 DSH `0.2.1-alpha.2`，更新后的 peer 版本要求尚未发布到 npm。使用该版本时，先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
 
 ## Python 与 SymPy
 
@@ -158,7 +158,7 @@ curator 工具使用工作区相对的 `knowledge/...` 路径，list/grep 还允
 
 ## 开发与验证
 
-将此仓库与 tag 为 `dsh-v0.2.1-alpha.1`（提交 `5badb15009ae1756c3afe0ae0cef1faafc290ccc`）的 `deepseek-harness` 仓库放在同一父目录中。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build:lib`，然后在 AlphaSolve 仓库执行：
+将此仓库与 tag 为 `dsh-v0.2.1-alpha.2`（提交 `d743267388641bc76f17c45ce8b4c231aed1d32c`）的 `deepseek-harness` 仓库放在同一父目录中。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build:lib`，然后在 AlphaSolve 仓库执行：
 
 ```sh
 pnpm install --frozen-lockfile
