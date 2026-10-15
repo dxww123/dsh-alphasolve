@@ -22,7 +22,16 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.1-alpha.2`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.1-alpha.3`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+
+## Migrating source installations to DSH 0.2.1-alpha.3
+
+The [Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-alpha.3/docs/upgrade-guide/v0.2.1-alpha.2) describe the changes from alpha.2. Check these settings when upgrading an AlphaSolve installation:
+
+- Headless uses the launch environment, the workspace `.env`, then `$DSH_HOME/.env`; saved API keys and sign-ins no longer authenticate it by default. Supply the required key through one of those sources. Web and Desktop prioritize a saved key over an environment variable with the same name.
+- For Azure, rename the `llm-pi-ai` provider key `config.providers.azure-openai-responses` to `config.providers.azure` and update explicit provider selections to `azure`. The Responses API identifier `azure-openai-responses` and `AZURE_OPENAI_*` environment variable names remain unchanged.
+- Start an existing custom profile with `dsh --profile <name>`. Repeating `--from-default-profile` replaces its directory, including installed plugins and `cordis.patch.yml`; use it only when intentionally resetting the profile.
+- When upgrading through a running plugin manager with HMR, remove the installed `dsh-alphasolve` package, then add the new build. Installing over the existing package returns `already-installed`. Follow any restart prompt.
 
 ## Python and SymPy
 
@@ -177,13 +186,18 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 
 ## Development and validation
 
-Keep this checkout next to a `deepseek-harness` checkout at tag
-`dsh-v0.2.1-alpha.2` (commit `d743267388641bc76f17c45ce8b4c231aed1d32c`). Development
+Keep this checkout next to a `deepseek-harness` checkout at commit
+`571902028a75c64c1d767f4ae5fd099485f0ddf0` on `master`, which includes
+tag `dsh-v0.2.1-alpha.3`. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and
-`pnpm run build:lib` before compiling AlphaSolve or running the packed
-installation probe. Then run these commands in the AlphaSolve checkout:
+`pnpm run build` before compiling AlphaSolve or running the packed installation
+probe. This prepares the current Host, Client, and Web artifacts and runs the
+aggregate type checks. When running those steps separately, use
+`pnpm run build:artifacts` before `pnpm run build:check`; the latter does not
+rebuild missing or stale artifacts. Then run these commands in the AlphaSolve
+checkout:
 
 ```sh
 pnpm install --frozen-lockfile

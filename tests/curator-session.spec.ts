@@ -8,7 +8,7 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import { type Agent } from '@deepseek-ai/dsh-agent'
 import { LlmAdapter, ToolCallId, createUserMessage, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { prepareCuratorSession, readCuratorSessionIdentity, CURATOR_SESSION_PATH } from '../src/curator-session.js'
 import { createCuratorKnowledgeTools } from '../src/curator-tools.js'
