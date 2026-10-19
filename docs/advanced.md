@@ -22,13 +22,13 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.1-alpha.5`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.1-rc.2`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
-## Migrating source installations to DSH 0.2.1-alpha.5
+## Migrating source installations to DSH 0.2.1-rc.2
 
-AlphaSolve's exact DSH peer requirements are now `0.2.1-alpha.5`; rebuild and reinstall this checkout before starting it on alpha.5. Harness retains the [compatibility rule introduced in alpha.4](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.5/docs/upgrade-guide/v0.2.1-alpha.3/plugin-engines-dsh/guide.md): it checks `engines.dsh` when declared and otherwise checks DSH peers. AlphaSolve uses the peer rule and requires no compatibility exemption.
+AlphaSolve's exact DSH peer requirements are now `0.2.1-rc.2`, with Cordis `4.0.5`; rebuild and reinstall this checkout before starting it on rc.2. Harness retains the [compatibility rule introduced in alpha.4](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.3/plugin-engines-dsh/guide.md): it checks `engines.dsh` when declared and otherwise checks DSH peers. AlphaSolve uses the peer rule and requires no compatibility exemption.
 
-When upgrading from alpha.2 or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-alpha.5/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
+When upgrading from alpha.2 or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
 
 - Headless uses the launch environment, the workspace `.env`, then `$DSH_HOME/.env`; saved API keys and sign-ins no longer authenticate it by default. Supply the required key through one of those sources. Web and Desktop prioritize a saved key over an environment variable with the same name.
 - For Azure, rename the `llm-pi-ai` provider key `config.providers.azure-openai-responses` to `config.providers.azure` and update explicit provider selections to `azure`. The Responses API identifier `azure-openai-responses` and `AZURE_OPENAI_*` environment variable names remain unchanged.
@@ -189,8 +189,8 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at commit
-`1517a4dbca0a2789ff1d41ba439600f8547d23fa` on `master`, which includes
-tag `dsh-v0.2.1-alpha.5`. Development
+`687f282e8625c6b8d11ff58211a90524be2e4317` on `master`, which includes
+tag `dsh-v0.2.1-rc.2`. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and

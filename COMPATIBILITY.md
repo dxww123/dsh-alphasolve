@@ -1,18 +1,18 @@
 # Compatibility
 
-The current source checkout targets DSH `0.2.1-alpha.5`, source commit
-`1517a4dbca0a2789ff1d41ba439600f8547d23fa` on `master`, which includes
-tag `dsh-v0.2.1-alpha.5` (`1517a4dbca0a2789ff1d41ba439600f8547d23fa`),
+The current source checkout targets DSH `0.2.1-rc.2`, source commit
+`687f282e8625c6b8d11ff58211a90524be2e4317` on `master`, which includes
+tag `dsh-v0.2.1-rc.2` (`687f282e8625c6b8d11ff58211a90524be2e4317`),
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
 
 The published npm package `dsh-alphasolve@0.4.0` targets DSH `0.2.0-rc.2`.
 The updated peer requirements in this checkout have not been published to npm;
-for DSH `0.2.1-alpha.5`, build this checkout and install it locally using the
+for DSH `0.2.1-rc.2`, build this checkout and install it locally using the
 [development instructions](docs/advanced.md#development-and-validation).
 
-Validated on Windows on 2026-10-17: all nine Harness build gates, including
+Validated on Windows on 2026-10-19: all nine Harness build gates, including
 library and Web production builds and Host and Client aggregate type checks,
 AlphaSolve typecheck and build, 283 passing tests with 4 existing platform skips,
 the client bundle check, and an isolated packed installation using the current
@@ -20,13 +20,13 @@ Harness peers, real Cordis Loader, and confined SymPy execution. Real Headless
 and Web profiles loaded the plugin; a local deterministic model stub verified
 activation and cross-process Session restoration with environment-only Headless
 authentication, and Web authentication reached the built homepage.
-Initial Harness builds encountered memory allocation failures and a Windows
-esbuild temporary-file deletion error. With `DSH_GATE_CONCURRENCY=1`,
-`RAYON_NUM_THREADS=1`, and `TOKIO_WORKER_THREADS=1`, plus a process-scoped
-environment preload selecting esbuild's memory IPC only for Vite, the unchanged
-full `pnpm run build` passed all nine gates and generated a fresh client artifact
-record. Live-model mathematical quality, actual worker solving, interactive browser
-behavior, and installed Desktop `0.2.1-alpha.5` were not tested.
+The Harness build used `DSH_GATE_CONCURRENCY=1`, `RAYON_NUM_THREADS=1`, and
+`TOKIO_WORKER_THREADS=1`, plus a process-scoped environment preload selecting
+esbuild's memory IPC only for Vite, to accommodate this Windows environment.
+The unchanged full `pnpm run build` passed all nine gates and generated a fresh
+client artifact record, whose 331 artifacts were verified against the current
+commit and version. Live-model mathematical quality, actual worker solving, interactive browser
+behavior, and installed Desktop `0.2.1-rc.2` were not tested.
 
 - Runtime: Node.js `^22.19.0` or `>=24.0.0`.
 - Package manager used for development: pnpm 11.
@@ -45,7 +45,7 @@ behavior, and installed Desktop `0.2.1-alpha.5` were not tested.
 - DSH surfaces: the one-shot `headless` profile, long-lived `web` profile,
   Desktop, and custom profiles into which this package is explicitly installed.
   The previous installed-Desktop probe covered `0.2.0-rc.2`; Desktop
-  `0.2.1-alpha.5` has not been validated here.
+  `0.2.1-rc.2` has not been validated here.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
 - DSH Agent presets: `standard`, `cordis`, and `ptc` are supported. The plugin
@@ -83,16 +83,19 @@ not being the final answer. DSH-specific session isolation, durable wait
 delivery, problem digests, two-phase promotion, and atomic winner publication
 are retained as safety extensions.
 
-This checkout pins DSH peers to `0.2.1-alpha.5` and Cordis to `4.0.5-alpha.2`,
+This checkout pins DSH peers to `0.2.1-rc.2` and Cordis to `4.0.5`,
 and does not contain older API adapters. Session restoration runs in the
 awaited `agent/created` hook.
 Harness checks `engines.dsh` when present and otherwise checks DSH
 peers. AlphaSolve leaves `engines.dsh` undeclared and uses the peer rule.
-The current Harness compatibility evaluator rejects the previous alpha.4
+The current Harness compatibility evaluator rejects the previous alpha.5
 peer requirements and accepts this manifest without an exemption.
-The alpha.5 account-notification migration changes optional notification metadata;
-AlphaSolve does not consume that API. Its configuration and stored Session events
-need no migration for this update.
+The rc.1 release notes collect earlier migrations from `0.2.0-rc.2`; those
+relevant to AlphaSolve were already incorporated before this update. The changes
+since alpha.5 add DeepSeek Search/Fetch providers and a model-label badge, and
+make the Web service's provider selections volatile. AlphaSolve does not consume
+that Web configuration API or the optional search-request `thinking` field.
+Its configuration and stored Session events need no migration for this update.
 AlphaSolve registers a Session projection for activation authorization and
 committed wait acknowledgements; role output and activity use current scoped
 events. All notices use the registered `alphasolve` message source.
