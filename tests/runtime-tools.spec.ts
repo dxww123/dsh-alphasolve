@@ -1,3 +1,4 @@
+import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -16,9 +17,9 @@ import {
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { defineContentToolFixture, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 
-import { alphaSolveSessionProjection } from '../src/session-state.js'
+import { AlphaSolveSessionStateService } from '../src/session-state.js'
 
 import { ORCHESTRATOR_INDEX_PATH_PATTERN } from '../src/permissions.js'
 import { PROJECT_TOOL_NAMES } from '../src/project-tools.js'
@@ -129,7 +130,7 @@ async function harness(
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
-  ctx.sessionProjections.register(alphaSolveSessionProjection)
+  await ctx.plugin(AlphaSolveSessionStateService)
   for (const name of ['read', 'glob', 'grep']) {
     ctx.tools.register(defineContentToolFixture({
       name,
@@ -241,7 +242,7 @@ async function execute(
   args: unknown,
   callId: string,
 ) {
-  return ctx.tools.execute({
+  return executeModelToolFixture(ctx, {
     signal: new AbortController().signal,
     callId: ToolCallId(callId),
     name,

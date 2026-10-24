@@ -21,11 +21,13 @@ dsh plugin --profile headless add dsh-alphasolve
 
 Desktop 有独立的 profile。使用图形界面中的插件管理器，或完全退出 Desktop 后使用其自带命令运行 `dsh plugin --profile desktop add dsh-alphasolve`；通过 npm 安装的 DSH 命令不能管理该 profile。
 
-当前源码面向 DSH `0.2.1-rc.2`，更新后的 peer 版本要求尚未发布到 npm。使用该版本时，先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
+当前源码面向[兼容性说明](../COMPATIBILITY.md)记录的 DSH `0.2.1-rc.3` 源码提交，该提交晚于 rc.3 release tag；更新后的 peer 版本要求尚未发布到 npm。先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
 
-## 将源码安装迁移至 DSH 0.2.1-rc.2
+## 将源码安装迁移至当前 DSH 0.2.1-rc.3 源码
 
-AlphaSolve 的精确 DSH peer 版本要求现已更新为 `0.2.1-rc.2`，Cordis 要求为 `4.0.5`；在 rc.2 上启动前，请重新构建并安装此源码。Harness 保留了 [alpha.4 引入的兼容性规则](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.3/plugin-engines-dsh/guide.zh.md)：优先检查已声明的 `engines.dsh`，否则检查 DSH peer 版本。AlphaSolve 使用 peer 规则，无需兼容性豁免。
+请使用 Node.js 24.9 或更新版本，先构建 Harness 提交 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60`，再重新构建并安装 AlphaSolve。精确 DSH peer 版本为 `0.2.1-rc.3`，Cordis 为 `4.0.5`。rc.3 release tag 早于本次所需的 API 变更，因此仅安装 rc.3 发布二进制不足以满足要求。Harness 优先检查已声明的 `engines.dsh`，否则检查 DSH peer；AlphaSolve 使用 peer 规则，无需兼容性豁免。
+
+激活或恢复 AlphaSolve 前，请选择 native 工具执行器。当前 Harness API 无法在临时覆盖后恢复继承的执行器，因此 PTC 会返回 `agent_executor_requires_native`，不修改工作区状态；预检结束后原 PTC 执行器仍可使用。插件等待 projection 注册完成后才接收事件，版本 1 的状态无需迁移。直接调用底层 runtime API 的自定义代码需先挂载 `AlphaSolveSessionStateService`；正常插件入口会自动处理。
 
 从 alpha.2 或更早版本升级时，还需遵循[先前的 Harness 升级指南](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2)，检查以下设置：
 
@@ -97,10 +99,10 @@ dsh web
 |---|---|
 | `standard` | 支持。 |
 | `cordis` | 支持；AlphaSolve 对各 role 的更窄权限仍然生效。 |
-| `ptc` | 支持。AlphaSolve 激活期间使用 native 工具呈现，`run_code` 仍被禁止；卸载后恢复 PTC 呈现。 |
+| `ptc` | 返回 `agent_executor_requires_native` 并拒绝激活；请先选择 native 执行器。原执行器保持不变。 |
 | `minimal` | 返回 `agent_preset_missing_required_tools` 并拒绝激活；插件不会暗中补充缺少的权限。 |
 
-自定义 preset 必须同时提供 `read`、`write`、`edit`、`glob` 和 `grep`，并且不能用
+自定义 preset 的执行器必须直接暴露 `read`、`write`、`edit`、`glob` 和 `grep`，并且不能用
 complete system prompt 压掉 AlphaSolve 的工作流 section；否则插件会返回
 `agent_preset_blocks_alphasolve_prompt` 并拒绝激活。在 Web 主 session 中明确提出
 AlphaSolve 求解请求，例如：
@@ -156,7 +158,7 @@ curator 在同一个主 Session、同一道题的同一轮求解中持续复用�
 
 所有 worker 都是 fresh Agent：先加入主 session 正在使用的同一 preset generation，
 再叠加 AlphaSolve 针对各 role 的权限收窄。worker 不能使用 shell、`run_code`、Web 或
-任意 subagent。AlphaSolve 工具、native 呈现覆盖、prompt、并发状态和权限只属于触发
+任意 subagent。AlphaSolve 工具、prompt、并发状态和权限只属于触发
 它的 session；同一 `dsh web` 进程中的其他 session 不会因此新增这些能力。
 
 ## 角色文件查找
@@ -169,7 +171,7 @@ curator 工具使用工作区相对的 `knowledge/...` 路径，list/grep 还允
 
 ## 开发与验证
 
-将此仓库与 `master` 提交为 `687f282e8625c6b8d11ff58211a90524be2e4317` 的 `deepseek-harness` 仓库放在同一父目录中；该提交包含 tag `dsh-v0.2.1-rc.2`。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，准备当前 Host、Client 和 Web 产物并运行整体类型检查。若分开执行这些步骤，应先运行 `pnpm run build:artifacts`，再运行 `pnpm run build:check`；后者不会重建缺失或过期产物。然后在 AlphaSolve 仓库执行：
+将此仓库与 `master` 提交为 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` 的 `deepseek-harness` 仓库放在同一父目录中；该提交比 tag `dsh-v0.2.1-rc.3` 晚 1533 个提交。使用 Node.js 24.9 或更新版本。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，准备当前 Host、Client 和 Web 产物并运行整体类型检查。若分开执行这些步骤，应先运行 `pnpm run build:artifacts`，再运行 `pnpm run build:check`；后者不会重建缺失或过期产物。然后在 AlphaSolve 仓库执行：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -183,7 +185,7 @@ pnpm run test:packed
 
 打包安装验证会在隔离的临时使用方目录中，通过真实 Cordis Loader 和当前 Harness 服务加载 tarball，不会发送模型请求。数学求解质量和桌面 UI 的完整流程需要使用已配置的模型提供方另行验证。
 
-在 Windows 上，可以直接对已安装、版本与源码要求一致的桌面端做加载验证：
+在 Windows 上，桌面加载验证需要使用同一 Harness 源码提交构建的 Desktop；rc.3 发布二进制不提供这些 API。验证不会修改其配置：
 
 ```sh
 pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"

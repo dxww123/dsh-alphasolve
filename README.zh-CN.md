@@ -6,7 +6,7 @@
 
 ## 安装
 
-以下 npm 安装步骤适用于已发布的 `dsh-alphasolve@0.4.0` 和 DSH `0.2.0-rc.2`。当前源码面向 DSH `0.2.1-rc.2`，相关改动尚未发布到 npm；使用该版本时，请[从源码构建并本地安装](docs/advanced.zh-CN.md#开发与验证)。
+以下 npm 安装步骤适用于已发布的 `dsh-alphasolve@0.4.0` 和 DSH `0.2.0-rc.2`。当前源码面向[兼容性说明](COMPATIBILITY.md)记录的 DSH `0.2.1-rc.3` 源码提交，该提交晚于 rc.3 发布版本；相关改动尚未发布到 npm。请使用 Node.js 24.9 或更新版本和 native 工具执行器，并[从源码构建两个仓库后本地安装](docs/advanced.zh-CN.md#开发与验证)。
 
 1. 安装 **DeepSeek Harness 官方桌面端 0.2.0-rc.2**，配置好可用的模型。
 2. 在插件管理中选择「添加插件」，输入 **`dsh-alphasolve`** 并安装，选择「立即启用」，按提示重启。

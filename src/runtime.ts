@@ -74,6 +74,7 @@ const WEB_TOOLS = ['web', 'web_search', 'web_fetch'] as const
 
 export const AGENT_PRESET_MISSING_TOOLS_REASON = 'agent_preset_missing_required_tools' as const
 export const AGENT_PRESET_BLOCKS_PROMPT_REASON = 'agent_preset_blocks_alphasolve_prompt' as const
+export const AGENT_EXECUTOR_REQUIRES_NATIVE_REASON = 'agent_executor_requires_native' as const
 
 export interface AlphaSolveAgentCapabilities {
   readonly agentPreset?: string
@@ -709,6 +710,12 @@ export class AlphaSolveRuntime {
     signal?: AbortSignal,
     mode: ActivationMode = 'explicit',
   ): Promise<{ readonly runtime: AlphaSolveRuntime; readonly resumed: boolean }> {
+    const initialAssembly = await agent.ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
+    throwIfActivationCancelled(signal)
+    if (initialAssembly.tools.some(tool => tool.name === 'run_code')
+      || ALPHASOLVE_REQUIRED_FILE_TOOLS.some(name => !initialAssembly.tools.some(tool => tool.name === name))) {
+      throw new AgentExecutorRequiresNativeError()
+    }
     const prepared = await AlphaSolveRuntime.prepare(agent, request, defaults, onDisposed, signal, mode)
     try {
       throwIfActivationCancelled(signal)
@@ -755,7 +762,6 @@ export class AlphaSolveRuntime {
   }
 
   private install(ctx: Context): () => Promise<void> {
-    ctx.tools.presentAs('native')
     const runtimeTools = this.createRuntimeTools().filter(tool => (
       !this.terminalRecovery
       || tool.name === RUNTIME_TOOL_NAMES.wait
@@ -1136,6 +1142,13 @@ class AgentPresetPromptConflictError extends Error {
   }
 }
 
+class AgentExecutorRequiresNativeError extends Error {
+  constructor() {
+    super(AGENT_EXECUTOR_REQUIRES_NATIVE_REASON)
+    this.name = 'AgentExecutorRequiresNativeError'
+  }
+}
+
 /** Convert activation failures into a stable preflight tool result. */
 export async function activateAlphaSolveRuntime(
   agent: Agent,
@@ -1173,6 +1186,9 @@ export async function activateAlphaSolveRuntime(
         workspace: error.workspace,
         reason: 'solution_exists_confirmation_required',
       }
+    }
+    if (error instanceof AgentExecutorRequiresNativeError) {
+      return { activated: false, workspace, reason: AGENT_EXECUTOR_REQUIRES_NATIVE_REASON }
     }
     if (error instanceof AgentPresetPromptConflictError) {
       return {
@@ -1239,6 +1255,9 @@ export async function restoreAlphaSolveRuntime(
     }
   } catch (error) {
     if (signal?.aborted) throw signal.reason ?? error
+    if (error instanceof AgentExecutorRequiresNativeError) {
+      return { restored: false, workspace, reason: AGENT_EXECUTOR_REQUIRES_NATIVE_REASON }
+    }
     if (error instanceof AgentPresetPromptConflictError) {
       return {
         restored: false,

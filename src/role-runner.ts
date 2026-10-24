@@ -10,6 +10,7 @@ import {
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native'
 import {
   foldSubagentDescriptor,
   SUBAGENT_DESCRIPTOR_VERSION,
@@ -413,7 +414,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
       if (joinedPreset !== agentPreset) {
         throw new Error('AlphaSolve role Agent did not join the parent Agent preset selected at creation')
       }
-      childCtx.tools.presentAs('native')
+      childCtx.tools.setExecutor(new NativeToolExecutor(childCtx))
 
       childCtx.systemPrompt.section({
         name: 'deployment:persona-prefix',

@@ -120,12 +120,21 @@ importers:
       '@deepseek-ai/dsh-system-prompt':
         specifier: link:../deepseek-harness/packages/core/system-prompt
         version: link:../deepseek-harness/packages/core/system-prompt
+      '@deepseek-ai/dsh-tool-executor-native':
+        specifier: link:../deepseek-harness/packages/core/tool-executor-native
+        version: link:../deepseek-harness/packages/core/tool-executor-native
+      '@deepseek-ai/dsh-tool-executor-ptc':
+        specifier: link:../deepseek-harness/packages/core/tool-executor-ptc
+        version: link:../deepseek-harness/packages/core/tool-executor-ptc
       '@deepseek-ai/dsh-tool-fs':
         specifier: link:../deepseek-harness/packages/fs/tool-fs
         version: link:../deepseek-harness/packages/fs/tool-fs
       '@deepseek-ai/dsh-tool-fs-search':
         specifier: link:../deepseek-harness/packages/fs/tool-fs-search
         version: link:../deepseek-harness/packages/fs/tool-fs-search
+      '@deepseek-ai/dsh-tool-testkit':
+        specifier: link:../deepseek-harness/packages/test-support/tool-testkit
+        version: link:../deepseek-harness/packages/test-support/tool-testkit
       '@deepseek-ai/dsh-tools':
         specifier: link:../deepseek-harness/packages/core/tools
         version: link:../deepseek-harness/packages/core/tools

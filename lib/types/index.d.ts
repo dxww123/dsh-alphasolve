@@ -19,5 +19,5 @@ export interface Config {
 }
 export declare const Config: z<Config>;
 /** Install only the dormant trigger listener. It contributes no global tool or prompt. */
-export declare function apply(ctx: Context, config?: Config): () => Promise<void>;
+export declare function apply(ctx: Context, config?: Config): Promise<() => Promise<void>>;
 //# sourceMappingURL=index.d.ts.map

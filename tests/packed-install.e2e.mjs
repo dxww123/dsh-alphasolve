@@ -193,6 +193,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import LocalSandbox from '@deepseek-ai/dsh-sandbox-local'
 import { PythonSession, resolvePythonOptions } from '${sourceManifest.name}/python'
@@ -224,10 +225,11 @@ assert.throws(() => plugin.Config({ defaultCapacity: 0 }), /defaultCapacity expe
 
 const ctx = new Context()
 try {
-  await ctx.plugin(AgentRegistry)
   await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(AgentRegistry)
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(LocalSubprocess)
   await ctx.plugin(LocalSandbox)
   await ctx.plugin(Loader, { baseUrl: pathToFileURL(consumer + path.sep).href })

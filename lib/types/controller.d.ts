@@ -19,10 +19,12 @@ export declare class AlphaSolveController {
     private readonly ctx;
     private readonly options;
     private readonly states;
+    private readonly pendingActivations;
+    private readonly pendingAgentDisposals;
     private readonly activate;
     private readonly restore;
     constructor(ctx: Context, options?: ControllerOptions);
-    install(): () => Promise<void>;
+    install(): Promise<() => Promise<void>>;
     private beginRestore;
     private injectRestoreDiagnostic;
     private mountPreflight;

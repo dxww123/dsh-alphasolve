@@ -59,11 +59,12 @@ const hooks = registerHooks({
   },
 })
 try {
-  const [{ Context }, { default: AgentRegistry }, { default: SystemPrompt }, { default: ToolRuntime }, { default: SessionProjectionRegistry }, { default: Loader }, { default: ClientModuleRegistry }, { default: LocalSubprocess }, { default: LocalSandbox }, { PythonSession, resolvePythonOptions }, plugin] = await Promise.all([
+  const [{ Context }, { default: AgentRegistry }, { default: SystemPrompt }, { default: ToolRuntime }, NativeToolExecutor, { default: SessionProjectionRegistry }, { default: Loader }, { default: ClientModuleRegistry }, { default: LocalSubprocess }, { default: LocalSandbox }, { PythonSession, resolvePythonOptions }, plugin] = await Promise.all([
     import('@deepseek-ai/cordis'),
     import('@deepseek-ai/dsh-agent'),
     import('@deepseek-ai/dsh-system-prompt'),
     import('@deepseek-ai/dsh-tools'),
+    import('@deepseek-ai/dsh-tool-executor-native'),
     import('@deepseek-ai/dsh-session-projection'),
     import('@deepseek-ai/cordis-plugin-loader'),
     import('@deepseek-ai/dsh-client-modules'),
@@ -74,10 +75,11 @@ try {
   ])
   const ctx = new Context()
   try {
-    await ctx.plugin(AgentRegistry)
     await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(LocalSubprocess)
     await ctx.plugin(LocalSandbox)
     await ctx.plugin(Loader, { baseUrl: ${JSON.stringify(pathToFileURL(packageRoot + path.sep).href)} })

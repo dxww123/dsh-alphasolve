@@ -37,7 +37,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** Install only the dormant trigger listener. It contributes no global tool or prompt. */
-export function apply(ctx: Context, config: Config = {}): () => Promise<void> {
+export async function apply(ctx: Context, config: Config = {}): Promise<() => Promise<void>> {
   const controller = new AlphaSolveController(ctx, {
     defaultCapacity: config.defaultCapacity ?? 2,
     defaultDetailedTrace: config.defaultDetailedTrace ?? true,

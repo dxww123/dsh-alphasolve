@@ -1,4 +1,5 @@
-import { lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import { lstat, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path, { dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -26,9 +27,9 @@ import {
   type UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { RUN_CODE_NAME, defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 
-import { alphaSolveSessionProjection } from '../src/session-state.js'
+import { AlphaSolveSessionStateService } from '../src/session-state.js'
 
 import {
   ACTIVATE_TOOL_NAME,
@@ -96,19 +97,19 @@ async function presetHarness(): Promise<Context> {
   contexts.push(ctx)
   ctx.baseUrl = `${pathToFileURL(FIXTURES).href}/`
   await ctx.plugin(Loader)
-  await mountAgentLoopTestDependencies(ctx)
-  ctx.sessionProjections.register(alphaSolveSessionProjection)
+  await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
+  await ctx.plugin(AlphaSolveSessionStateService)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(PresentationRuntime)
   await ctx.plugin(AgentPresets, { default: 'standard' })
-  for (const marker of ['standard', 'minimal', 'complete'] as const) {
+  for (const marker of ['standard', 'minimal', 'complete', 'ptc'] as const) {
     await ctx.plugin(AgentPreset, {
       id: marker,
       plugins: [{
         name: pathToFileURL(path.join(FIXTURES, 'plugins', 'alphasolve-compat.js')).href,
         config: {
           marker,
-          presentation: marker === 'minimal' ? 'native' : 'ptc',
+          presentation: marker === 'ptc' ? 'ptc' : 'native',
           complete: marker === 'complete',
           tools: marker === 'minimal' ? ['read'] : [...REQUIRED_FILE_TOOLS, 'bash'],
         },
@@ -122,7 +123,7 @@ async function headlessHarness(): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
-  ctx.sessionProjections.register(alphaSolveSessionProjection)
+  await ctx.plugin(AlphaSolveSessionStateService)
   await ctx.plugin(AgentLoop, { agents: [] })
   for (const name of [...REQUIRED_FILE_TOOLS, 'bash']) {
     ctx.tools.register(defineContentToolFixture({
@@ -139,7 +140,7 @@ async function createAgent(
   ctx: Context,
   id: string,
   cwd: string,
-  preset?: 'standard' | 'minimal' | 'complete',
+  preset?: 'standard' | 'minimal' | 'complete' | 'ptc',
 ): Promise<Agent> {
   const handle = await ctx.agents.create({
     sessionId: SessionId(id),
@@ -175,7 +176,7 @@ async function submit(ctx: Context, agent: Agent, input: UserMessage): Promise<v
 }
 
 async function activateFromPreflight(ctx: Context, agent: Agent) {
-  return await ctx.tools.execute({
+  return await executeModelToolFixture(ctx, {
     signal: new AbortController().signal,
     callId: ToolCallId(`activate-${agent.id}`),
     name: ACTIVATE_TOOL_NAME,
@@ -191,7 +192,7 @@ describe('declarative Agent Preset compatibility', () => {
     const agent = await createAgent(ctx, 'preset-minimal', root, 'minimal')
     const activate = vi.fn<() => Promise<RuntimeActivationResult>>()
     const lookup = vi.spyOn(ctx.tools, 'get')
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     const result = await activateFromPreflight(ctx, agent)
@@ -211,44 +212,50 @@ describe('declarative Agent Preset compatibility', () => {
     }
   })
 
-  it('temporarily presents a PTC parent natively and restores PTC after preflight disposal', async () => {
+  it('blocks run_code during PTC preflight and restores the unchanged executor afterward', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
-    const agent = await createAgent(ctx, 'preset-ptc-preflight', root, 'standard')
-    const activate = vi.fn(async (subject: Agent): Promise<RuntimeActivationResult> => {
-      // The preflight lease is released before the runtime owns presentation.
-      expect(ctx.tools.get(RUN_CODE_NAME, subject)).toBeDefined()
-      return {
-        activated: false,
-        workspace: root,
-        reason: 'fixture activation did not start',
-      }
+    const agent = await createAgent(ctx, 'preset-ptc-preflight', root, 'ptc')
+    const run = vi.spyOn(ctx.ptcRuntime, 'run').mockResolvedValue({ logs: [], value: 7 })
+    const activate = vi.fn<() => Promise<RuntimeActivationResult>>()
+    await new AlphaSolveController(ctx, { activate }).install()
+    const call = (id: string) => executeModelToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId(id), name: RUN_CODE_NAME,
+      arguments: { code: 'return 7', description: 'verify the selected PTC executor' }, agent,
     })
-    new AlphaSolveController(ctx, { activate }).install()
+    expect(await call('ptc-before-preflight')).toMatchObject({ isError: false, value: { result: 7 } })
+    expect(run).toHaveBeenCalledOnce()
+    run.mockClear()
 
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
-    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name))
-      .toEqual([ACTIVATE_TOOL_NAME, 'read'])
+    const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent))
+    expect(assembly.tools.map(tool => tool.name)).toEqual([RUN_CODE_NAME])
+    expect(assembly.sections.find(section => section.name === 'alphasolve:preflight')?.text)
+      .toMatch(/native/i)
+    const denied = await call('ptc-denied-during-preflight')
+    expect(denied.isError).toBe(true)
+    expect(JSON.stringify(denied)).toMatch(/native tool executor/i)
+    expect(run).not.toHaveBeenCalled()
+    expect(activate).not.toHaveBeenCalled()
+    expect(await readdir(root)).toEqual(['problem.md'])
 
-    await activateFromPreflight(ctx, agent)
-    // An unsuccessful activation reacquires the preflight's native lease.
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
     agentEvents(ctx, agent).emit('agent/status', { status: 'idle' })
     await vi.waitFor(() => expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined())
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name))
+      .toEqual([RUN_CODE_NAME])
+    expect(await call('ptc-after-preflight')).toMatchObject({ isError: false, value: { result: 7 } })
+    expect(run).toHaveBeenCalledOnce()
   })
 
   it('hands a real preflight to the real runtime without retaining the preflight tool restriction', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
     const agent = await createAgent(ctx, 'preset-controller-runtime', root, 'standard')
-    const disposeController = new AlphaSolveController(ctx, {
+    const disposeController = await new AlphaSolveController(ctx, {
       defaultDetailedTrace: false,
     }).install()
 
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     const activation = await activateFromPreflight(ctx, agent)
 
@@ -267,7 +274,7 @@ describe('declarative Agent Preset compatibility', () => {
         properties: { file_path: { pattern: ORCHESTRATOR_INDEX_PATH_PATTERN } },
       })
     }
-    const denied = await ctx.tools.execute({
+    const denied = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('preset-controller-runtime-denied-write'),
       name: 'write',
@@ -282,18 +289,18 @@ describe('declarative Agent Preset compatibility', () => {
     await disposeController()
 
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
   })
 
   it('rejects a complete-prompt preset when it hides the AlphaSolve orchestrator section', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
     const agent = await createAgent(ctx, 'preset-complete-prompt', root, 'complete')
-    new AlphaSolveController(ctx, { defaultDetailedTrace: false }).install()
+    await new AlphaSolveController(ctx, { defaultDetailedTrace: false }).install()
 
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
 
     const activation = await activateFromPreflight(ctx, agent)
 
@@ -310,74 +317,67 @@ describe('declarative Agent Preset compatibility', () => {
       .rejects.toMatchObject({ code: 'ENOENT' })
 
     // The failed activation restores the preflight lease until this response
-    // turn settles, then unloads it and exposes the inherited PTC presentation again.
+    // turn settles, then unloads it and restores the inherited native tool catalog.
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
     agentEvents(ctx, agent).emit('agent/status', { status: 'idle' })
     await vi.waitFor(() => expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined())
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
   })
 
-  it('keeps a live AlphaSolve runtime native and restores its inherited PTC presentation on dispose', async () => {
+  it('rejects a PTC runtime before filesystem changes and leaves its executor usable', async () => {
     const root = await workspace()
     const ctx = await presetHarness()
-    const agent = await createAgent(ctx, 'preset-ptc-runtime', root, 'standard')
-
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
-    const collapsedRead = await ctx.tools.execute({
-      signal: new AbortController().signal,
-      callId: ToolCallId('preset-ptc-runtime-collapsed-read'),
-      name: 'read',
-      arguments: { file_path: 'problem.md' },
-      agent,
-    })
-    expect(collapsedRead).toMatchObject({
-      isError: true,
-      error: { info: { name: 'ToolNotFoundError', code: 'UNKNOWN_TOOL' } },
-    })
+    const agent = await createAgent(ctx, 'preset-ptc-runtime', root, 'ptc')
+    const run = vi.spyOn(ctx.ptcRuntime, 'run').mockResolvedValue({ logs: [], value: 11 })
     const activated = await activateAlphaSolveRuntime(
-      agent,
-      { capacity: 2 },
-      { defaultDetailedTrace: false },
-      () => undefined,
+      agent, { capacity: 2 }, { defaultDetailedTrace: false }, () => undefined,
+    )
+    expect(activated).toMatchObject({ activated: false, reason: 'agent_executor_requires_native' })
+    expect(await readdir(root)).toEqual(['problem.md'])
+    expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name))
+      .toEqual([RUN_CODE_NAME])
+    const stillPtc = await executeModelToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('ptc-after-rejected-activation'),
+      name: RUN_CODE_NAME, arguments: { code: 'return 11', description: 'confirm PTC remains usable' }, agent,
+    })
+    expect(stillPtc).toMatchObject({ isError: false, value: { result: 11 } })
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a native executor before activation, during runtime, and after disposal', async () => {
+    const root = await workspace()
+    const ctx = await presetHarness()
+    const agent = await createAgent(ctx, 'preset-native-runtime', root, 'standard')
+    const read = (id: string) => executeModelToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId(id), name: 'read',
+      arguments: { file_path: 'problem.md' }, agent,
+    })
+    expect(await read('native-before-runtime')).toMatchObject({ isError: false, value: { name: 'read' } })
+    const activated = await activateAlphaSolveRuntime(
+      agent, { capacity: 2 }, { defaultDetailedTrace: false }, () => undefined,
     )
     expect(activated.activated).toBe(true)
-    if (!activated.activated) throw new Error(`fixture activation failed: ${activated.reason}`)
-
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeUndefined()
-    expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeDefined()
+    if (!activated.activated) throw new Error('fixture activation failed: ' + activated.reason)
     const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent))
     expect(assembly.tools.map(tool => tool.name))
       .toEqual(expect.arrayContaining([...REQUIRED_FILE_TOOLS, RUNTIME_TOOL_NAMES.worker]))
+    expect(assembly.tools.map(tool => tool.name)).not.toContain(RUN_CODE_NAME)
     expect(assembly.sections.map(section => section.name)).toContain('preset:standard')
     expect(assembly.sections.map(section => section.name)).toContain('alphasolve:orchestrator')
-    const configured = await ctx.tools.execute({
-      signal: new AbortController().signal,
-      callId: ToolCallId('preset-ptc-runtime-native-configure'),
-      name: RUNTIME_TOOL_NAMES.configure,
-      arguments: { capacity: 3 },
-      agent,
+    const configured = await executeModelToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('native-runtime-configure'),
+      name: RUNTIME_TOOL_NAMES.configure, arguments: { capacity: 3 }, agent,
     })
     expect(configured).toMatchObject({
-      isError: false,
-      value: { previousCapacity: 2, capacity: 3 },
+      isError: false, value: { previousCapacity: 2, capacity: 3 },
     })
-
     await activated.runtime.dispose()
-
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBeDefined()
-    const restoredCollapse = await ctx.tools.execute({
-      signal: new AbortController().signal,
-      callId: ToolCallId('preset-ptc-runtime-restored-collapse'),
-      name: 'read',
-      arguments: { file_path: 'problem.md' },
-      agent,
-    })
-    expect(restoredCollapse).toMatchObject({
-      isError: true,
-      error: { info: { name: 'ToolNotFoundError', code: 'UNKNOWN_TOOL' } },
-    })
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(agent))).tools.map(tool => tool.name))
+      .toEqual(expect.arrayContaining([...REQUIRED_FILE_TOOLS, 'bash']))
+    expect(await read('native-after-runtime')).toMatchObject({ isError: false, value: { name: 'read' } })
   })
 })
 
@@ -387,7 +387,7 @@ describe('role child preset composition', () => {
     const ctx = await presetHarness()
     const adapter = new CompletingAdapter()
     ctx.llm.registerAdapter(['fixture'], adapter)
-    const parent = await createAgent(ctx, 'preset-role-parent', root, 'standard')
+    const parent = await createAgent(ctx, 'preset-role-parent', root, 'ptc')
     let observed: {
       preset?: string
       durablePreset?: string
@@ -411,7 +411,7 @@ describe('role child preset composition', () => {
         const assembly = await childCtx.systemPrompt.assemble(assembleContextFor(child))
         observed = {
           preset: ctx.agentPresets.composedPreset(childCtx),
-          durablePreset: child.ctx.sessionProjections.stateOf(child.session, 'agentPreset') ?? undefined,
+          durablePreset: child.ctx.get('agentPresets')?.presetForSession(child.session) ?? undefined,
           toolNames: assembly.tools.map(tool => tool.name),
           sectionNames: assembly.sections.map(section => section.name),
         }
@@ -419,15 +419,15 @@ describe('role child preset composition', () => {
     })
 
     expect(result).toMatchObject({ stopReason: 'completed', text: 'role completed' })
-    expect(observed.preset).toBe('standard')
-    expect(observed.durablePreset).toBe('standard')
+    expect(observed.preset).toBe('ptc')
+    expect(observed.durablePreset).toBe('ptc')
     expect(observed.toolNames).toEqual(expect.arrayContaining(['read', 'glob', 'grep']))
     for (const name of ['write', 'edit', 'bash', RUN_CODE_NAME]) {
       expect(observed.toolNames, name).not.toContain(name)
     }
-    expect(observed.sectionNames).toContain('preset:standard')
+    expect(observed.sectionNames).toContain('preset:ptc')
     expect(observed.sectionNames).toContain('deployment:persona-prefix')
-    expect(ctx.tools.get(RUN_CODE_NAME, parent)).toBeDefined()
+    expect((await ctx.systemPrompt.assemble(assembleContextFor(parent))).tools.map(tool => tool.name)).toContain(RUN_CODE_NAME)
   })
 
   it('retains global Headless tools when no AgentPresets service exists', async () => {

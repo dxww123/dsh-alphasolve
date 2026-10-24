@@ -1,3 +1,4 @@
+import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -17,11 +18,9 @@ import {
   type StreamChunk,
   type UserMessage,
 } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
-import {
-  defineContentToolFixture,
-  type ToolRunContext,
-} from '@deepseek-ai/dsh-tools'
+import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { AlphaSolveSessionStateService, alphaSolveSessionState } from '../src/session-state.js'
+import { type ToolRunContext } from '@deepseek-ai/dsh-tools'
 
 import {
   ACTIVATE_TOOL_NAME,
@@ -142,17 +141,173 @@ describe('dormant AlphaSolve trigger', () => {
     const fork = {
       session: { header: { parentSession: SessionId('parent') } },
     } as unknown as Agent
+    const seededFork = {
+      session: { header: { isSeeded: true } },
+    } as unknown as Agent
     const subagent = {
       session: { header: { origin: 'subagent' } },
     } as unknown as Agent
 
     expect(isTopLevelAgent(top)).toBe(true)
     expect(isTopLevelAgent(fork)).toBe(false)
+    expect(isTopLevelAgent(seededFork)).toBe(false)
     expect(isTopLevelAgent(subagent)).toBe(false)
   })
 })
 
 describe('session-scoped preflight lifecycle', () => {
+  it('does not activate in a seeded fork without a parent Session reference', async () => {
+    const ctx = await harness()
+    const parent = await createAgent(ctx, 'controller-fork-source')
+    const activate = vi.fn()
+    await new AlphaSolveController(ctx, { activate }).install()
+    const fork = await ctx.agents.create({
+      sessionId: SessionId('controller-seeded-fork'),
+      seed: parent.session.snapshotEvents(),
+      meta: { isSeeded: true },
+      inheritedEventCount: SessionLogOffset(parent.session.snapshotEvents().length),
+      agentOptions: { provider: 'unused', model: 'unused' },
+    })
+    expect(fork.agent.session.header.isSeeded).toBe(true)
+    expect(fork.agent.session.header.parentSession).toBeUndefined()
+    await submit(ctx, fork.agent, message('Use AlphaSolve to solve problem.md.'))
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, fork.agent)).toBeUndefined()
+    expect(activate).not.toHaveBeenCalled()
+  })
+
+  it('removes controller listeners and scoped tools when its explicit disposer runs', async () => {
+    const ctx = await harness()
+    const agent = await createAgent(ctx, 'controller-disposed')
+    const dispose = await new AlphaSolveController(ctx).install()
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
+    await dispose()
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+    expect(ctx.get('alphaSolveSessions')).toBeUndefined()
+    await submit(ctx, agent, message('Use AlphaSolve again.'))
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+  })
+
+  it.each(['explicit', 'plugin-fiber'] as const)('aborts and drains pending activation before %s disposal releases the state owner', async (unload) => {
+    const ctx = await harness()
+    registerRequiredFileTools(ctx)
+    const agent = await createAgent(ctx, 'controller-late-activation')
+    const entered = Promise.withResolvers<void>()
+    const aborted = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    ctx.on('dispose', () => release.resolve())
+    let runtimeFiber: Fiber | undefined
+    const runtimeDispose = vi.fn(async () => runtimeFiber?.dispose())
+    const activate = vi.fn(async (current: Agent, _request, _defaults, _onDisposed, signal): Promise<RuntimeActivationResult> => {
+      signal!.addEventListener('abort', () => aborted.resolve(), { once: true })
+      entered.resolve()
+      await release.promise
+      runtimeFiber = current.ctx.plugin((inner: Context) => {
+        inner.tools.register(defineContentToolFixture({
+          name: RUNTIME_TOOL_NAMES.worker,
+          description: 'late runtime worker',
+          parameters: {},
+          execute: () => Promise.resolve([{ type: 'text', text: 'worker' }]),
+        }))
+      })
+      await runtimeFiber
+      return {
+        activated: true,
+        workspace: '/test/workspace',
+        capacity: 2,
+        resumed: false,
+        runtime: { dispose: runtimeDispose } as unknown as AlphaSolveRuntime,
+      }
+    })
+    let plugin: Fiber | undefined
+    let dispose!: () => Promise<void>
+    if (unload === 'plugin-fiber') {
+      plugin = ctx.plugin({
+        name: 'controller-unload-fixture',
+        inject: ['agents', 'tools', 'systemPrompt', 'sessionProjections'],
+        apply: async (owner: Context) => {
+          dispose = await new AlphaSolveController(owner, { activate }).install()
+          return dispose
+        },
+      })
+      await plugin
+    } else {
+      dispose = await new AlphaSolveController(ctx, { activate }).install()
+    }
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    const pending = executeModelToolFixture(ctx, {
+      signal: new AbortController().signal,
+      callId: ToolCallId('activation-completes-after-dispose'),
+      name: ACTIVATE_TOOL_NAME,
+      arguments: {},
+      agent,
+    })
+    await entered.promise
+    let disposed = false
+    const ownerDisposal = plugin?.dispose()
+    if (plugin !== undefined) await aborted.promise
+    const firstDisposal = dispose()
+    expect(dispose()).toBe(firstDisposal)
+    void firstDisposal.then(() => { disposed = true })
+    await aborted.promise
+    expect(disposed).toBe(false)
+    expect(ctx.get('alphaSolveSessions')).toBeDefined()
+    expect(alphaSolveSessionState(agent).latestActivation).toBe(-1)
+    release.resolve()
+    const result = await pending
+    await firstDisposal
+    await ownerDisposal
+    expect(result.isError).toBe(true)
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('controller was disposed') })
+    expect(runtimeDispose).toHaveBeenCalledOnce()
+    expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeUndefined()
+    expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, agent)).toBeUndefined()
+    expect(ctx.get('alphaSolveSessions')).toBeUndefined()
+  })
+  it('reuses an explicitly mounted state owner without disposing another composition', async () => {
+    const ctx = await harness()
+    const stateOwner = ctx.plugin(AlphaSolveSessionStateService)
+    await stateOwner
+    const agent = await createAgent(ctx, 'controller-shared-state-owner')
+    const dispose = await new AlphaSolveController(ctx).install()
+    expect(alphaSolveSessionState(agent).latestActivation).toBe(-1)
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    await dispose()
+    expect(ctx.get('alphaSolveSessions')).toBeDefined()
+    expect(alphaSolveSessionState(agent).latestActivation).toBe(-1)
+    await stateOwner.dispose()
+    expect(() => alphaSolveSessionState(agent)).toThrow('Session state service is not registered')
+  })
+
+  it('reports runtime cleanup failure after releasing its state owner', async () => {
+    const ctx = await harness()
+    registerRequiredFileTools(ctx)
+    const agent = await createAgent(ctx, 'controller-cleanup-failure')
+    const cleanupError = new Error('runtime cleanup failed')
+    const runtimeDispose = vi.fn(async () => { throw cleanupError })
+    const activate = vi.fn(async (): Promise<RuntimeActivationResult> => ({
+      activated: true,
+      workspace: '/test/workspace',
+      capacity: 2,
+      resumed: false,
+      runtime: { dispose: runtimeDispose } as unknown as AlphaSolveRuntime,
+    }))
+    const dispose = await new AlphaSolveController(ctx, { activate }).install()
+    await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
+    const activation = await executeModelToolFixture(ctx, {
+      signal: new AbortController().signal,
+      callId: ToolCallId('activation-cleanup-failure'),
+      name: ACTIVATE_TOOL_NAME,
+      arguments: {},
+      agent,
+    })
+    expect(activation.isError).toBe(false)
+    const disposing = dispose()
+    await expect(disposing).rejects.toMatchObject({ errors: [cleanupError] })
+    expect(dispose()).toBe(disposing)
+    expect(runtimeDispose).toHaveBeenCalledOnce()
+    expect(ctx.get('alphaSolveSessions')).toBeUndefined()
+  })
   it('temporarily exposes only read plus the local activation tool', async () => {
     const ctx = await harness()
     for (const name of ['read', 'bash']) {
@@ -164,7 +319,7 @@ describe('session-scoped preflight lifecycle', () => {
       }))
     }
     const agent = await createAgent(ctx, 'controller-preflight-tools')
-    new AlphaSolveController(ctx).install()
+    await new AlphaSolveController(ctx).install()
 
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     expect(ctx.tools.get('read', agent)).toBeDefined()
@@ -179,7 +334,7 @@ describe('session-scoped preflight lifecycle', () => {
   it('stages the preflight prompt and activation tool before the triggering step assembly', async () => {
     const ctx = await harness()
     const agent = await createAgent(ctx, 'controller-preflight-context')
-    new AlphaSolveController(ctx).install()
+    await new AlphaSolveController(ctx).install()
     const input = message('Use AlphaSolve to solve problem.md.')
     const signal = new AbortController().signal
 
@@ -224,13 +379,13 @@ describe('session-scoped preflight lifecycle', () => {
         runtime: { dispose: runtimeDispose } as unknown as AlphaSolveRuntime,
       }
     })
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, first, message('Please solve it with AlphaSolve.'))
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, first)).toBeDefined()
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, second)).toBeUndefined()
 
-    const activation = await ctx.tools.execute({
+    const activation = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('activate-first'),
       name: ACTIVATE_TOOL_NAME,
@@ -243,7 +398,7 @@ describe('session-scoped preflight lifecycle', () => {
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.wait, first)).toBeDefined()
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.worker, second)).toBeUndefined()
     expect(ctx.tools.get(RUNTIME_TOOL_NAMES.wait, second)).toBeUndefined()
-    const guessed = await ctx.tools.execute({
+    const guessed = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('second-guesses-worker'),
       name: RUNTIME_TOOL_NAMES.worker,
@@ -258,7 +413,7 @@ describe('session-scoped preflight lifecycle', () => {
     const ctx = await harness()
     const agent = await createAgent(ctx, 'controller-one-turn')
     const activate = vi.fn()
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, agent, message('Explain AlphaSolve to me.'))
     expect(ctx.tools.get(ACTIVATE_TOOL_NAME, agent)).toBeDefined()
@@ -273,10 +428,10 @@ describe('session-scoped preflight lifecycle', () => {
     registerRequiredFileTools(ctx)
     const agent = await createAgent(ctx, 'controller-no-first-turn-overwrite')
     const activate = vi.fn()
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
-    const activation = await ctx.tools.execute({
+    const activation = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('activation-illegal-overwrite'),
       name: ACTIVATE_TOOL_NAME,
@@ -299,10 +454,10 @@ describe('session-scoped preflight lifecycle', () => {
       workspace: '/test/workspace',
       reason: 'solution_exists_confirmation_required',
     }))
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
-    const activation = await ctx.tools.execute({
+    const activation = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('activation-needs-confirmation'),
       name: ACTIVATE_TOOL_NAME,
@@ -330,7 +485,7 @@ describe('session-scoped preflight lifecycle', () => {
     const activate = vi.fn(async (): Promise<RuntimeActivationResult> => {
       throw new Error('activator must not be reached')
     })
-    new AlphaSolveController(ctx, { activate }).install()
+    await new AlphaSolveController(ctx, { activate }).install()
 
     await submit(ctx, agent, message('Use AlphaSolve to solve problem.md.'))
     const tool = ctx.tools.get(ACTIVATE_TOOL_NAME, agent)
@@ -388,7 +543,7 @@ describe('same-session cold resume lifecycle', () => {
         runtime: { dispose: runtimeDispose } as unknown as AlphaSolveRuntime,
       }
     })
-    new AlphaSolveController(ctx, { restore }).install()
+    await new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-cold-resume')
     let claimed = 0
     ctx.on('agent/inbox/claimed', ({ agent: subject }) => {
@@ -432,7 +587,7 @@ describe('same-session cold resume lifecycle', () => {
       await gate.promise
       return { restored: false, workspace: '/test/workspace', reason: 'late restore failure' }
     })
-    new AlphaSolveController(ctx, { restore }).install()
+    await new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-cancelled-resume')
     const abort = new AbortController()
     const initialization = agent.runMaintenance(() => agentEvents(ctx, agent).serial('agent/created', {
@@ -459,7 +614,7 @@ describe('same-session cold resume lifecycle', () => {
       restored: false,
       workspace: '/test/workspace',
     }))
-    new AlphaSolveController(ctx, { restore }).install()
+    await new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-resume-dormant')
 
     await agentEvents(ctx, agent).serial('agent/created', { source: 'resume' })
@@ -478,7 +633,7 @@ describe('same-session cold resume lifecycle', () => {
       workspace: '/test/workspace',
       reason: 'problem.md changed during recovery',
     }))
-    new AlphaSolveController(ctx, { restore }).install()
+    await new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-resume-failure')
 
     await agentEvents(ctx, agent).serial('agent/created', { source: 'resume' })
@@ -498,7 +653,7 @@ describe('same-session cold resume lifecycle', () => {
       agentPreset: 'minimal',
       missingTools: ['write', 'edit', 'glob', 'grep'],
     }))
-    new AlphaSolveController(ctx, { restore }).install()
+    await new AlphaSolveController(ctx, { restore }).install()
     const agent = await createAgent(ctx, 'controller-resume-missing-tools')
     const inject = vi.spyOn(agent, 'inject')
 

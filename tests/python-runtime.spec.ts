@@ -1,3 +1,5 @@
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,6 +25,7 @@ async function fixture(config: PythonConfig = {}) {
   cleanup.push(() => ctx.fiber.dispose())
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(LocalSandboxProvider, {})
   const options = resolvePythonOptions({ executable, timeoutMs: 30_000, ...config })
@@ -36,7 +39,7 @@ describe.skipIf(!existsSync(executable))('Python through the real Harness subpro
   it('executes SymPy and preserves helper variables while emitting canonical tool output', async () => {
     const { ctx, options } = await fixture()
     cleanup.push(installPythonTool(ctx, options))
-    const call = (code: string, id: string) => ctx.tools.execute({ name: 'alphasolve_python', arguments: { code }, callId: ToolCallId(id), signal: new AbortController().signal })
+    const call = (code: string, id: string) => executeModelToolFixture(ctx, { name: 'alphasolve_python', arguments: { code }, callId: ToolCallId(id), signal: new AbortController().signal })
     const first = await call("x = sp.symbols('x')\nprint('精确计算')\nsp.integrate(x**2, (x, 0, 1))", 'symbolic')
     expect(first.isError, JSON.stringify(first.content)).toBe(false)
     expect(first.content).toMatchInlineSnapshot(`

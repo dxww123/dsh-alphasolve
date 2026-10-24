@@ -15,6 +15,7 @@ export declare const RUNTIME_TOOL_NAMES: Readonly<{
 export declare const ALPHASOLVE_REQUIRED_FILE_TOOLS: readonly ["read", "write", "edit", "glob", "grep"];
 export declare const AGENT_PRESET_MISSING_TOOLS_REASON: "agent_preset_missing_required_tools";
 export declare const AGENT_PRESET_BLOCKS_PROMPT_REASON: "agent_preset_blocks_alphasolve_prompt";
+export declare const AGENT_EXECUTOR_REQUIRES_NATIVE_REASON: "agent_executor_requires_native";
 export interface AlphaSolveAgentCapabilities {
     readonly agentPreset?: string;
     readonly missingTools: readonly string[];

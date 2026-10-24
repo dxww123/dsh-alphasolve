@@ -1,3 +1,5 @@
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -115,6 +117,7 @@ async function toolContext(): Promise<Context> {
   contexts.push(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   return ctx
 }
 
@@ -171,7 +174,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
     await verifier?.setupHelpers?.(ctx, roleChild)
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([SUBAGENT_TOOL_NAME])
 
-    const denied = await ctx.tools.execute({
+    const denied = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('research-denied'),
       name: SUBAGENT_TOOL_NAME,
@@ -180,7 +183,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
     expect(denied.isError).toBe(true)
     expect(denied.content[0]).toMatchObject({ text: expect.stringMatching(/cannot launch/) })
 
-    const reasoning = await ctx.tools.execute({
+    const reasoning = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('reasoning-ok'),
       name: SUBAGENT_TOOL_NAME,
@@ -225,7 +228,7 @@ describe('AlphaSolveRoleService workflow roles', () => {
     const ctx = await toolContext()
     await generator?.setupHelpers?.(ctx, {} as Agent)
 
-    const calculation = await ctx.tools.execute({
+    const calculation = await executeModelToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('compute-helper'),
       name: SUBAGENT_TOOL_NAME,
@@ -413,7 +416,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
     ].sort())
     expect(childCtx.tools.get('bash')).toBeUndefined()
 
-    const write = await childCtx.tools.execute({
+    const write = await executeModelToolFixture(childCtx, {
       signal: new AbortController().signal,
       callId: ToolCallId('curator-write'),
       name: CURATOR_TOOL_NAMES.write,
@@ -422,7 +425,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
     expect(write.isError).toBe(false)
     await expect(readFile(path.join(root, 'knowledge', 'new-page.md'), 'utf8')).resolves.toBe('# New page\n')
 
-    const read = await childCtx.tools.execute({
+    const read = await executeModelToolFixture(childCtx, {
       signal: new AbortController().signal,
       callId: ToolCallId('curator-read-long-range'),
       name: CURATOR_TOOL_NAMES.read,
@@ -444,7 +447,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
       ]
     `)
 
-    const list = await childCtx.tools.execute({
+    const list = await executeModelToolFixture(childCtx, {
       signal: new AbortController().signal,
       callId: ToolCallId('curator-list-dot'),
       name: CURATOR_TOOL_NAMES.list,
@@ -454,7 +457,7 @@ describe('AlphaSolveRoleService auxiliary routes', () => {
     expect(JSON.stringify(list.content)).toContain('knowledge/new-page.md')
     expect(JSON.stringify(list.content)).not.toContain('problem.md')
 
-    const deniedHelper = await childCtx.tools.execute({
+    const deniedHelper = await executeModelToolFixture(childCtx, {
       signal: new AbortController().signal,
       callId: ToolCallId('curator-helper-denied'),
       name: SUBAGENT_TOOL_NAME,

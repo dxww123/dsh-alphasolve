@@ -7,7 +7,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { type Agent } from '@deepseek-ai/dsh-agent'
 import { LlmAdapter, ToolCallId, createUserMessage, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { prepareCuratorSession, readCuratorSessionIdentity, CURATOR_SESSION_PATH } from '../src/curator-session.js'
@@ -262,7 +262,10 @@ describe('persistent curator conversation', () => {
     const adapter = new ScriptedAdapter(['Retried once.'])
     const { parent, ctx } = await harness(root, workspace, adapter)
     const identity = await prepareCuratorSession(workspace, parent.id)
-    const detached = ctx.sessions.prepare(identity.id, { meta: { cwd: workspace, parentSession: parent.id, origin: 'subagent' } })
+    const detached = Session.create(identity.id, undefined, {
+      version: SESSION_FORMAT_VERSION, id: identity.id, createdAt: Date.now(), isSeeded: false,
+      cwd: workspace, parentSession: parent.id, origin: 'subagent',
+    })
     const message = createUserMessage({ content: [{ type: 'text', text: 'stale pending copy' }], source: { kind: 'user' } })
     detached.append('agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 0, inserted: [message] })
     const writer = await ctx.sessionPersistence.create(detached.header)

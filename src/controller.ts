@@ -5,7 +5,7 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 
-import { alphaSolveSessionProjection } from './session-state.js'
+import { AlphaSolveSessionStateService } from './session-state.js'
 
 import {
   AGENT_PRESET_BLOCKS_PROMPT_REASON,
@@ -34,7 +34,9 @@ For an affirmative solve request:
 
 If activation reports agent_preset_missing_required_tools, explain which tools are missing and ask the user to use an Agent preset that provides the standard read/write/edit/glob/grep filesystem tools. Do not attempt to widen the preset yourself.
 
-If activation reports agent_preset_blocks_alphasolve_prompt, explain that the selected preset enforces a complete system prompt which suppresses the AlphaSolve workflow instructions, and ask the user to choose standard, cordis, ptc, or a compatible custom preset.
+If activation reports agent_preset_blocks_alphasolve_prompt, explain that the selected preset enforces a complete system prompt which suppresses the AlphaSolve workflow instructions, and ask the user to choose standard, cordis, or a compatible custom preset with native tool execution.
+
+If the selected tool interface only exposes run_code, explain that AlphaSolve requires a native tool executor and ask the user to select the standard or cordis preset with native execution, then retry. Do not call run_code to perform preflight or activation.
 
 Never use bash or arbitrary code to perform these checks.`
 
@@ -47,10 +49,12 @@ export interface ControllerOptions extends AlphaSolveRuntimeDefaults {
 
 interface PreflightState {
   readonly kind: 'preflight'
+  readonly abort: AbortController
+  activationDone?: Promise<void>
   readonly dispose: () => void
-  /** Reinstate native presentation plus the read-only preflight catalog. */
+  /** Reinstate the read-only preflight catalog. */
   readonly resumeToolIsolation: () => void
-  /** Yield both leases while the runtime discovers the parent preset's full catalog. */
+  /** Yield the restriction while the runtime discovers the parent preset's full catalog. */
   readonly suspendToolIsolation: () => void
   readonly agentPreset?: string
   readonly missingRequiredTools: readonly string[]
@@ -85,7 +89,8 @@ export function requestsAlphaSolvePreflight(message: UserMessage): boolean {
 
 /** Subagent/fork sessions never receive the dormant trigger controller. */
 export function isTopLevelAgent(agent: Agent): boolean {
-  return agent.session.header.parentSession === undefined
+  return agent.session.header.isSeeded !== true
+    && agent.session.header.parentSession === undefined
     && agent.session.header.origin !== 'subagent'
 }
 
@@ -131,6 +136,8 @@ function publicActivationResult(result: RuntimeActivationResult): Record<string,
 /** Owns every dynamic child fiber created by the otherwise dormant plugin. */
 export class AlphaSolveController {
   private readonly states = new Map<Agent, ControllerState>()
+  private readonly pendingActivations = new Set<PreflightState>()
+  private readonly pendingAgentDisposals = new Set<Promise<void>>()
   private readonly activate: typeof activateAlphaSolveRuntime
   private readonly restore: typeof restoreAlphaSolveRuntime
 
@@ -142,24 +149,29 @@ export class AlphaSolveController {
     this.restore = options.restore ?? restoreAlphaSolveRuntime
   }
 
-  install(): () => Promise<void> {
-    const disposeProjection = this.ctx.sessionProjections.register(alphaSolveSessionProjection)
-    this.ctx.on('agent/created', async ({ agent, source, signal }) => {
+  async install(): Promise<() => Promise<void>> {
+    const sessionState = this.ctx.get('alphaSolveSessions') === undefined
+      ? this.ctx.plugin(AlphaSolveSessionStateService)
+      : undefined
+    if (sessionState !== undefined) await sessionState
+    this.ctx.fiber.assertActive()
+    const listeners: Array<() => void> = []
+    listeners.push(this.ctx.on('agent/created', async ({ agent, source, signal }) => {
       if (source !== 'resume' || this.states.has(agent) || !isTopLevelAgent(agent)) return
       await this.beginRestore(agent, signal)
-    })
+    }))
 
     // Claiming happens immediately before prompt/tool assembly. Install the
     // scoped preflight synchronously here so its section and activation tool
     // are present in the frozen assembly for the triggering step. pre-step
     // below remains the authoritative decision/lifecycle seam.
-    this.ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+    listeners.push(this.ctx.on('agent/inbox/claimed', ({ agent, message }) => {
       if (this.states.has(agent)) return
       if (!isTopLevelAgent(agent) || !requestsAlphaSolvePreflight(message)) return
       this.mountPreflight(agent)
-    })
+    }))
 
-    this.ctx.on('agent/pre-step', async (
+    listeners.push(this.ctx.on('agent/pre-step', async (
       { agent, messages, signal },
       next,
     ): Promise<PreStepDecision> => {
@@ -180,38 +192,80 @@ export class AlphaSolveController {
         }
       }
       return next()
-    })
+    }))
 
-    this.ctx.on('agent/status', ({ agent, status }) => {
+    listeners.push(this.ctx.on('agent/status', ({ agent, status }) => {
       if (status !== 'idle') return
       const state = this.states.get(agent)
       if (state?.kind !== 'preflight') return
       if (!state.awaitingConfirmation || state.confirmationResponseStarted) {
         void this.disposePreflight(agent, state)
       }
-    })
+    }))
 
-    this.ctx.on('agent/disposed', async ({ agent }) => {
+    listeners.push(this.ctx.on('agent/disposed', async ({ agent }) => {
       const state = this.states.get(agent)
       this.states.delete(agent)
-      if (state?.kind === 'preflight') state.dispose()
-      else if (state?.kind === 'runtime') await state.runtime.dispose()
-      else if (state?.kind === 'restoring') state.abort.abort(new Error('AlphaSolve restoring agent was disposed'))
-    })
-
-    return async () => {
-      const states = [...this.states.entries()]
-      this.states.clear()
-      for (const [, state] of states) {
-        if (state.kind === 'restoring') state.abort.abort(new Error('AlphaSolve controller was disposed'))
+      const teardown = (async () => {
+        if (state?.kind === 'preflight') {
+          state.abort.abort(new Error('AlphaSolve preflight agent was disposed'))
+          state.dispose()
+          await state.activationDone
+        } else if (state?.kind === 'runtime') {
+          await state.runtime.dispose()
+        } else if (state?.kind === 'restoring') {
+          state.abort.abort(new Error('AlphaSolve restoring agent was disposed'))
+          await state.done
+        }
+      })()
+      this.pendingAgentDisposals.add(teardown)
+      try {
+        await teardown
+      } finally {
+        this.pendingAgentDisposals.delete(teardown)
       }
-      await Promise.allSettled(states.map(([, state]) => {
-        if (state.kind === 'preflight') return Promise.resolve(state.dispose())
-        if (state.kind === 'runtime') return state.runtime.dispose()
-        return state.done ?? Promise.resolve()
-      }))
-      disposeProjection()
+    }))
+
+    let disposal: Promise<void> | undefined
+    const cleanup = (): Promise<void> => {
+      disposal ??= Promise.resolve().then(async () => {
+        for (const dispose of listeners.splice(0).reverse()) dispose()
+        const states = [...this.states.entries()]
+        const activations = [...this.pendingActivations]
+        const activationDone = activations.map(state => state.activationDone!)
+        this.states.clear()
+        for (const state of activations) {
+          state.abort.abort(new Error('AlphaSolve controller was disposed'))
+        }
+        for (const [, state] of states) {
+          if (state.kind !== 'runtime') state.abort.abort(new Error('AlphaSolve controller was disposed'))
+        }
+        const settled = await Promise.allSettled([
+          ...activationDone,
+          ...this.pendingAgentDisposals,
+          ...states.map(async ([, state]) => {
+            if (state.kind === 'preflight') state.dispose()
+            else if (state.kind === 'runtime') await state.runtime.dispose()
+            else await state.done
+          }),
+        ])
+        const errors = settled.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+        try {
+          await sessionState?.dispose()
+        } catch (error) {
+          errors.push(error)
+        }
+        if (errors.length > 0) throw new AggregateError(errors, 'AlphaSolve controller disposal failed')
+      })
+      return disposal
     }
+    // Cordis unloads top-level effects concurrently. Adopt the child disposer
+    // into one ordered effect so state remains readable throughout cleanup.
+    this.ctx.effect(function* () {
+      if (sessionState !== undefined) yield sessionState.dispose
+      yield cleanup
+    }, 'alphasolve.controllerLifecycle()')
+    return cleanup
   }
 
   private beginRestore(agent: Agent, initializationSignal?: AbortSignal): Promise<void> {
@@ -293,26 +347,22 @@ export class AlphaSolveController {
   private mountPreflight(agent: Agent): PreflightState {
     const disposers: Array<() => void> = []
     let disposed = false
-    let nativePresentation: (() => void) | undefined
     let inheritedRestriction: (() => void) | undefined
     const ctx = agent.ctx
     const capabilities = inspectAlphaSolveAgentCapabilities(agent)
     const allowedInherited = ['read'].filter(name => ctx.tools.get(name, agent) !== undefined)
     const resumeToolIsolation = (): void => {
-      if (disposed) throw new Error('cannot reacquire AlphaSolve preflight presentation after disposal')
-      nativePresentation ??= ctx.tools.presentAs('native')
+      if (disposed) throw new Error('cannot reacquire AlphaSolve preflight restriction after disposal')
       inheritedRestriction ??= ctx.tools.restrict({ allow: allowedInherited })
     }
     const suspendToolIsolation = (): void => {
       const disposeRestriction = inheritedRestriction
       inheritedRestriction = undefined
       disposeRestriction?.()
-      const disposePresentation = nativePresentation
-      nativePresentation = undefined
-      disposePresentation?.()
     }
     const state: PreflightState = {
       kind: 'preflight',
+      abort: new AbortController(),
       resumeToolIsolation,
       suspendToolIsolation,
       ...(capabilities.agentPreset === undefined ? {} : { agentPreset: capabilities.agentPreset }),
@@ -336,9 +386,13 @@ export class AlphaSolveController {
       }))
       disposers.push(ctx.tools.register(this.activationTool(agent, state)))
       const allowed = new Set([ACTIVATE_TOOL_NAME, ...allowedInherited])
-      disposers.push(ctx.tools.guard(execution => allowed.has(execution.name)
-        ? undefined
-        : `tool "${execution.name}" is unavailable during AlphaSolve preflight`))
+      disposers.push(ctx.tools.guard(execution => {
+        if (allowed.has(execution.name)) return undefined
+        if (execution.name === 'run_code') {
+          return 'AlphaSolve requires a native tool executor; select the standard or cordis preset with native execution'
+        }
+        return `tool "${execution.name}" is unavailable during AlphaSolve preflight`
+      }))
       return state
     } catch (error) {
       if (this.states.get(agent) === state) this.states.delete(agent)
@@ -372,70 +426,84 @@ export class AlphaSolveController {
           throw exec.signal.reason ?? new DOMException('AlphaSolve activation cancelled', 'AbortError')
         }
         if (this.states.get(agent) !== state) throw new Error('AlphaSolve preflight is no longer active')
-        const request = activationRequest(args)
-        if (state.missingRequiredTools.length > 0) {
-          return {
-            activated: false,
-            workspace: agent.session.header.cwd ?? '',
-            reason: AGENT_PRESET_MISSING_TOOLS_REASON,
-            ...(state.agentPreset === undefined ? {} : { agentPreset: state.agentPreset }),
-            missingTools: [...state.missingRequiredTools],
-          }
-        }
-        if (request.overwriteSolution === true
-          && (!state.awaitingConfirmation || !state.confirmationResponseStarted)) {
-          return {
-            activated: false,
-            workspace: agent.session.header.cwd ?? '',
-            reason: 'overwrite_confirmation_not_established',
-          }
-        }
-        let runtimeRef: AlphaSolveRuntime | undefined
-        // Runtime installation must inspect the complete parent-preset tool
-        // catalog. Keep the execution guard in place across this hand-off so
-        // yielding PTC/read-only presentation never widens what this
-        // in-flight preflight turn can execute.
-        state.suspendToolIsolation()
-        let result: RuntimeActivationResult
+        if (state.activationDone !== undefined) throw new Error('AlphaSolve activation is already in progress')
+        const completion = Promise.withResolvers<void>()
+        state.activationDone = completion.promise
+        this.pendingActivations.add(state)
+        const signal = AbortSignal.any([exec.signal, state.abort.signal])
         try {
-          result = await this.activate(
-            agent,
-            request,
-            {
-              ...(this.options.defaultCapacity === undefined ? {} : {
-                defaultCapacity: this.options.defaultCapacity,
-              }),
-              ...(this.options.defaultDetailedTrace === undefined ? {} : {
-                defaultDetailedTrace: this.options.defaultDetailedTrace,
-              }),
-            },
-            () => {
-              const current = this.states.get(agent)
-              if (current?.kind === 'runtime' && current.runtime === runtimeRef) this.states.delete(agent)
-            },
-            exec.signal,
-          )
-        } catch (error) {
-          if (!exec.signal.aborted) state.resumeToolIsolation()
-          throw error
-        }
-        if (exec.signal.aborted) {
-          if (result.activated) await result.runtime.dispose()
-          throw exec.signal.reason ?? new DOMException('AlphaSolve activation cancelled', 'AbortError')
-        }
-        if (!result.activated) {
-          state.resumeToolIsolation()
-          if (result.reason === 'solution_exists_confirmation_required') {
-            state.awaitingConfirmation = true
-            state.confirmationResponseStarted = false
+          const request = activationRequest(args)
+          if (state.missingRequiredTools.length > 0) {
+            return {
+              activated: false,
+              workspace: agent.session.header.cwd ?? '',
+              reason: AGENT_PRESET_MISSING_TOOLS_REASON,
+              ...(state.agentPreset === undefined ? {} : { agentPreset: state.agentPreset }),
+              missingTools: [...state.missingRequiredTools],
+            }
           }
-          return publicActivationResult(result)
-        }
+          if (request.overwriteSolution === true
+            && (!state.awaitingConfirmation || !state.confirmationResponseStarted)) {
+            return {
+              activated: false,
+              workspace: agent.session.header.cwd ?? '',
+              reason: 'overwrite_confirmation_not_established',
+            }
+          }
+          let runtimeRef: AlphaSolveRuntime | undefined
+          // Runtime installation must inspect the complete parent-preset tool
+          // catalog. Keep the execution guard in place across this hand-off so
+          // yielding the read-only catalog restriction never widens what this
+          // in-flight preflight turn can execute.
+          state.suspendToolIsolation()
+          let result: RuntimeActivationResult
+          try {
+            result = await this.activate(
+              agent,
+              request,
+              {
+                ...(this.options.defaultCapacity === undefined ? {} : {
+                  defaultCapacity: this.options.defaultCapacity,
+                }),
+                ...(this.options.defaultDetailedTrace === undefined ? {} : {
+                  defaultDetailedTrace: this.options.defaultDetailedTrace,
+                }),
+              },
+              () => {
+                const current = this.states.get(agent)
+                if (current?.kind === 'runtime' && current.runtime === runtimeRef) this.states.delete(agent)
+              },
+              signal,
+            )
+          } catch (error) {
+            if (!signal.aborted && this.states.get(agent) === state) state.resumeToolIsolation()
+            throw error
+          }
+          if (signal.aborted || this.states.get(agent) !== state) {
+            if (result.activated) await result.runtime.dispose()
+            if (signal.aborted) {
+              throw signal.reason ?? new DOMException('AlphaSolve activation cancelled', 'AbortError')
+            }
+            throw new Error('AlphaSolve preflight is no longer active')
+          }
+          if (!result.activated) {
+            state.resumeToolIsolation()
+            if (result.reason === 'solution_exists_confirmation_required') {
+              state.awaitingConfirmation = true
+              state.confirmationResponseStarted = false
+            }
+            return publicActivationResult(result)
+          }
 
-        runtimeRef = result.runtime
-        this.states.set(agent, { kind: 'runtime', runtime: result.runtime })
-        state.dispose()
-        return publicActivationResult(result)
+          runtimeRef = result.runtime
+          this.states.set(agent, { kind: 'runtime', runtime: result.runtime })
+          state.dispose()
+          return publicActivationResult(result)
+        } finally {
+          delete state.activationDone
+          this.pendingActivations.delete(state)
+          completion.resolve()
+        }
       },
     }
   }
@@ -443,6 +511,8 @@ export class AlphaSolveController {
   private async disposePreflight(agent: Agent, state: PreflightState): Promise<void> {
     if (this.states.get(agent) !== state) return
     this.states.delete(agent)
+    state.abort.abort(new Error('AlphaSolve preflight was disposed'))
     state.dispose()
+    await state.activationDone
   }
 }

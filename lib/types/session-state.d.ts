@@ -1,7 +1,8 @@
 /** AlphaSolve notices and resumable state derived from committed Session events. */
+import { Service, type Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ContextFormed } from '@deepseek-ai/dsh-llm';
-import type { SessionEvent } from '@deepseek-ai/dsh-session';
+import type { Session } from '@deepseek-ai/dsh-session';
 import { z } from 'zod';
 declare const stateSchema: z.ZodObject<{
     pendingCalls: z.ZodRecord<z.ZodString, z.ZodObject<{
@@ -24,51 +25,20 @@ declare module '@deepseek-ai/dsh-llm' {
         } & ContextFormed;
     }
 }
-declare module '@deepseek-ai/dsh-session-projection' {
-    interface SessionProjectionStateMap {
-        alphasolve: AlphaSolveSessionState;
+declare module '@deepseek-ai/cordis' {
+    interface Context {
+        alphaSolveSessions: AlphaSolveSessionStateService;
     }
 }
-/** Session fold for activation authorization and successful wait delivery. */
-export declare const alphaSolveSessionProjection: {
-    key: "alphasolve";
-    stateSchema: z.ZodObject<{
-        pendingCalls: z.ZodRecord<z.ZodString, z.ZodObject<{
-            name: z.ZodEnum<{
-                alphasolve_activate: "alphasolve_activate";
-                alphasolve_wait: "alphasolve_wait";
-            }>;
-            sequence: z.ZodNumber;
-        }, z.core.$strip>>;
-        latestActivation: z.ZodNumber;
-        latestStop: z.ZodNumber;
-        successfulWaitCallIds: z.ZodArray<z.ZodString>;
-    }, z.core.$strip>;
-    stateVersion: number;
-    init: () => {
-        pendingCalls: {};
-        latestActivation: number;
-        latestStop: number;
-        successfulWaitCallIds: never[];
-    };
-    apply: (state: NoInfer<{
-        pendingCalls: Record<string, {
-            name: "alphasolve_activate" | "alphasolve_wait";
-            sequence: number;
-        }>;
-        latestActivation: number;
-        latestStop: number;
-        successfulWaitCallIds: string[];
-    }>, event: SessionEvent) => {
-        pendingCalls: Record<string, {
-            name: "alphasolve_activate" | "alphasolve_wait";
-            sequence: number;
-        }>;
-        latestActivation: number;
-        latestStop: number;
-        successfulWaitCallIds: string[];
-    };
-};
+/** Own the ready projection reader and its fiber-scoped registration. */
+export declare class AlphaSolveSessionStateService extends Service {
+    static inject: string[];
+    private projection;
+    constructor(ctx: Context);
+    protected [Service.init](): Promise<void>;
+    /** Read durable AlphaSolve intent and delivery acknowledgements at the Session cursor. */
+    stateOf(session: Session): AlphaSolveSessionState;
+}
 /** Read the registered AlphaSolve state at this Agent's committed Session cursor.
  * @param agent - live Agent whose Session owns the runtime.
  * @returns current activation and delivery state.

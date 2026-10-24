@@ -136,7 +136,7 @@ describe('role Agent technical timeouts', () => {
       get: vi.fn(() => undefined),
       systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
       tools: {
-        get: vi.fn(() => undefined), presentAs: vi.fn(), restrict: vi.fn(), guard: vi.fn(),
+        get: vi.fn(() => undefined), setExecutor: vi.fn(), restrict: vi.fn(), guard: vi.fn(),
       },
       on: vi.fn((name: string, listener: (...args: unknown[]) => unknown) => {
         if (name === 'session/event') sessionEvent = listener
@@ -217,7 +217,7 @@ describe('role Agent technical timeouts', () => {
         systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
         tools: {
           get: vi.fn(() => undefined),
-          presentAs: vi.fn(() => vi.fn()),
+          setExecutor: vi.fn(() => vi.fn()),
           restrict: vi.fn(),
           guard: vi.fn(() => vi.fn()),
         },
@@ -309,7 +309,7 @@ describe('role Agent technical timeouts', () => {
       systemPrompt: { section: vi.fn(), getSectionOrder: vi.fn(() => 0) },
       tools: {
         get: vi.fn(() => undefined),
-        presentAs: vi.fn(() => vi.fn()),
+        setExecutor: vi.fn(() => vi.fn()),
         restrict: vi.fn(),
         guard: vi.fn(() => vi.fn()),
       },

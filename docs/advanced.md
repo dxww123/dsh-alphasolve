@@ -22,11 +22,13 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.1-rc.2`; its updated peer requirements are not yet published to npm. For that version, follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets the DSH `0.2.1-rc.3` source commit listed in [Compatibility](../COMPATIBILITY.md), beyond the rc.3 release tag; its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
-## Migrating source installations to DSH 0.2.1-rc.2
+## Migrating source installations to current DSH 0.2.1-rc.3 source
 
-AlphaSolve's exact DSH peer requirements are now `0.2.1-rc.2`, with Cordis `4.0.5`; rebuild and reinstall this checkout before starting it on rc.2. Harness retains the [compatibility rule introduced in alpha.4](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.3/plugin-engines-dsh/guide.md): it checks `engines.dsh` when declared and otherwise checks DSH peers. AlphaSolve uses the peer rule and requires no compatibility exemption.
+Use Node.js 24.9 or newer and build Harness at `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.1-rc.3`, with Cordis `4.0.5`. The release tag predates required API changes, so installing rc.3 binaries alone is insufficient. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
+
+Choose native tool execution before activating or restoring AlphaSolve. The current Harness API cannot restore an inherited executor after a temporary override. PTC therefore returns `agent_executor_requires_native` without changing workspace state; the original PTC executor stays usable after preflight ends. Projection registration is awaited and its version-1 state needs no migration. Custom code calling the low-level runtime API must first mount `AlphaSolveSessionStateService`; the normal plugin handles this automatically.
 
 When upgrading from alpha.2 or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
 
@@ -100,10 +102,10 @@ preset:
 |---|---|
 | `standard` | Supported. |
 | `cordis` | Supported; AlphaSolve's narrower role permissions still apply. |
-| `ptc` | Supported. While AlphaSolve is active, its tools use native presentation and `run_code` remains denied; unloading restores PTC presentation. |
+| `ptc` | Refused with `agent_executor_requires_native`; choose native execution before activating AlphaSolve. The existing executor is preserved. |
 | `minimal` | Refused with `agent_preset_missing_required_tools`; the plugin never grants the missing capabilities implicitly. |
 
-A custom preset is accepted only when it supplies `read`, `write`, `edit`,
+A custom preset is accepted only when its executor directly exposes `read`, `write`, `edit`,
 `glob`, and `grep` and does not enforce a complete system prompt that suppresses
 AlphaSolve's workflow sections. Prompt-incompatible presets are refused with
 `agent_preset_blocks_alphasolve_prompt`. In the main Web session, make an
@@ -173,8 +175,8 @@ The curator keeps one durable Session for the same main Session and problem gene
 
 Every worker is a fresh Agent joined to the same preset generation as its main
 session, then narrowed by AlphaSolve's role-specific restrictions. Workers have
-no shell, `run_code`, Web, or general subagent access. AlphaSolve tools, native
-presentation override, prompts, capacity state, and permissions belong only to
+no shell, `run_code`, Web, or general subagent access. AlphaSolve tools,
+prompts, capacity state, and permissions belong only to
 the triggering session; other sessions in the same `dsh web` process do not
 gain them.
 
@@ -189,8 +191,8 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at commit
-`687f282e8625c6b8d11ff58211a90524be2e4317` on `master`, which includes
-tag `dsh-v0.2.1-rc.2`. Development
+`22ddee3792402c3e70ec5f86a63c3e3e895a2f60` on `master`, 1533 commits after
+tag `dsh-v0.2.1-rc.3`. Use Node.js 24.9 or newer. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and
@@ -218,8 +220,9 @@ and current Harness services in an isolated temporary consumer. It does not
 make a model request. Model-backed mathematical quality and a desktop UI run
 require separate verification with the configured model provider.
 
-On Windows, validate against an installed Desktop of the matching DSH version
-without changing its profile:
+On Windows, the Desktop load probe requires a Desktop built from the same
+Harness source commit. The rc.3 release binary does not provide these APIs.
+The probe leaves its profile unchanged:
 
 ```sh
 pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"

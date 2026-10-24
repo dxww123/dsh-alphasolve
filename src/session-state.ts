@@ -1,9 +1,10 @@
 /** AlphaSolve notices and resumable state derived from committed Session events. */
 
+import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { ProjectionDefinition, ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import { z } from 'zod'
 
 const stateSchema = z.object({
@@ -25,9 +26,9 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session-projection' {
-  interface SessionProjectionStateMap {
-    alphasolve: AlphaSolveSessionState
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    alphaSolveSessions: AlphaSolveSessionStateService
   }
 }
 
@@ -46,7 +47,7 @@ function activated(event: SessionEvent<'tool/result'>): boolean {
 }
 
 /** Session fold for activation authorization and successful wait delivery. */
-export const alphaSolveSessionProjection = {
+const alphaSolveSessionProjection = {
   key: 'alphasolve',
   stateSchema,
   stateVersion: 1,
@@ -77,16 +78,37 @@ export const alphaSolveSessionProjection = {
       latestActivation: activated(event) ? Math.max(state.latestActivation, call.sequence) : state.latestActivation,
     }
   },
-} satisfies ProjectionDefinition<'alphasolve'>
+} satisfies ProjectionDefinition<'alphasolve', AlphaSolveSessionState>
+
+/** Own the ready projection reader and its fiber-scoped registration. */
+export class AlphaSolveSessionStateService extends Service {
+  static inject = ['sessionProjections']
+
+  private projection!: ProjectionHandle<AlphaSolveSessionState>
+
+  constructor(ctx: Context) {
+    super(ctx, 'alphaSolveSessions')
+  }
+
+  protected async [Service.init](): Promise<void> {
+    this.projection = await this.ctx.sessionProjections.register(alphaSolveSessionProjection)
+    this.ctx.fiber.assertActive()
+  }
+
+  /** Read durable AlphaSolve intent and delivery acknowledgements at the Session cursor. */
+  stateOf(session: Session): AlphaSolveSessionState {
+    return this.projection.stateOf(session)
+  }
+}
 
 /** Read the registered AlphaSolve state at this Agent's committed Session cursor.
  * @param agent - live Agent whose Session owns the runtime.
  * @returns current activation and delivery state.
  */
 export function alphaSolveSessionState(agent: Agent): AlphaSolveSessionState {
-  const state = agent.ctx.sessionProjections.stateOf(agent.session, 'alphasolve')
-  if (state === undefined) throw new Error('AlphaSolve Session projection is not registered')
-  return state
+  const sessions = agent.ctx.get('alphaSolveSessions')
+  if (sessions === undefined) throw new Error('AlphaSolve Session state service is not registered')
+  return sessions.stateOf(agent.session)
 }
 
 /** Decide whether a successful activation has a later explicit stop.

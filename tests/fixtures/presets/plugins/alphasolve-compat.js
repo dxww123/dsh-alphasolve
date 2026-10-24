@@ -1,6 +1,8 @@
 // Model-facing preset fixture for the AlphaSolve compatibility integration
-// tests. It intentionally has no imports so the real preset Loader can resolve
-// it from the fixture directory exactly as it resolves a user-authored preset.
+// tests. The real preset Loader resolves this file and its executor imports
+// exactly as it resolves a user-authored preset.
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import * as PtcToolExecutor from '@deepseek-ai/dsh-tool-executor-ptc'
 
 export const name = 'alphasolve-compat-fixture'
 export const inject = ['tools', 'systemPrompt']
@@ -50,7 +52,7 @@ function tool(name) {
   }
 }
 
-export function apply(ctx, config) {
+export async function apply(ctx, config) {
   for (const toolName of config.tools ?? []) ctx.tools.register(tool(toolName))
   ctx.systemPrompt.section({
     name: `preset:${config.marker}`,
@@ -58,5 +60,7 @@ export function apply(ctx, config) {
     text: `fixture preset ${config.marker}`,
     ...(config.complete === true ? { complete: true } : {}),
   })
-  if (config.presentation !== undefined) ctx.tools.presentAs(config.presentation)
+  if (config.presentation !== undefined) {
+    await ctx.plugin(config.presentation === 'ptc' ? PtcToolExecutor : NativeToolExecutor)
+  }
 }

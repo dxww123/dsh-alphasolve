@@ -1,3 +1,4 @@
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -9,9 +10,9 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 
-import { alphaSolveSessionProjection, alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from '../src/session-state.js'
+
+import { AlphaSolveSessionStateService, alphaSolveSessionState, hasDurableAlphaSolveResumeIntent } from '../src/session-state.js'
 
 import { RuntimeStore } from '../src/store.js'
 import { STATE_VERSION, type WorkerRecord } from '../src/types.js'
@@ -66,7 +67,7 @@ async function createRuntimeAgent(
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
-  ctx.sessionProjections.register(alphaSolveSessionProjection)
+  await ctx.plugin(AlphaSolveSessionStateService)
   registerFileToolFixtures(ctx, tools)
   await ctx.plugin(AgentLoop, { agents: [] })
   const handle = await ctx.agents.create({
@@ -143,7 +144,7 @@ describe('same-session runtime recovery', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
-    ctx.sessionProjections.register(alphaSolveSessionProjection)
+    await ctx.plugin(AlphaSolveSessionStateService)
     await ctx.plugin(AgentLoop, { agents: [] })
     const handle = await ctx.agents.create({
       sessionId: SessionId('resume-without-intent-or-cwd'),
