@@ -21,15 +21,15 @@ dsh plugin --profile headless add dsh-alphasolve
 
 Desktop 有独立的 profile。使用图形界面中的插件管理器，或完全退出 Desktop 后使用其自带命令运行 `dsh plugin --profile desktop add dsh-alphasolve`；通过 npm 安装的 DSH 命令不能管理该 profile。
 
-当前源码面向[兼容性说明](../COMPATIBILITY.md)记录的 DSH `0.2.1-rc.3` 源码提交，该提交晚于 rc.3 release tag；更新后的 peer 版本要求尚未发布到 npm。先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
+当前源码面向 DSH `0.2.2-alpha.2`，对应[兼容性说明](../COMPATIBILITY.md)记录的 release tag 提交；更新后的 peer 版本要求尚未发布到 npm。先按照[开发与验证](#开发与验证)构建，再从源码目录执行上述命令，并将包名换成 `.`。插件管理器也支持 GitHub 来源，但需要 Git，并可能受 GitHub 传输和认证配置影响；npm 包不需要这一步。
 
-## 将源码安装迁移至当前 DSH 0.2.1-rc.3 源码
+## 将源码安装迁移至 DSH 0.2.2-alpha.2
 
-请使用 Node.js 24.9 或更新版本，先构建 Harness 提交 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60`，再重新构建并安装 AlphaSolve。精确 DSH peer 版本为 `0.2.1-rc.3`，Cordis 为 `4.0.5`。rc.3 release tag 早于本次所需的 API 变更，因此仅安装 rc.3 发布二进制不足以满足要求。Harness 优先检查已声明的 `engines.dsh`，否则检查 DSH peer；AlphaSolve 使用 peer 规则，无需兼容性豁免。
+请使用 Node.js 24.9 或更新版本，先构建 Harness 提交 `f3803c96974ad4a94195fb97e5c637e9c2a3afe3`，再重新构建并安装 AlphaSolve。精确 DSH peer 版本为 `0.2.2-alpha.2`，Cordis 为 `4.0.6-alpha.1`。该源码提交与 tag `dsh-v0.2.2-alpha.2` 一致；此处尚未测试该版本的已安装 Desktop 或发布二进制。Harness 优先检查已声明的 `engines.dsh`，否则检查 DSH peer；AlphaSolve 使用 peer 规则，无需兼容性豁免。
 
 激活或恢复 AlphaSolve 前，请选择 native 工具执行器。当前 Harness API 无法在临时覆盖后恢复继承的执行器，因此 PTC 会返回 `agent_executor_requires_native`，不修改工作区状态；预检结束后原 PTC 执行器仍可使用。插件等待 projection 注册完成后才接收事件，版本 1 的状态无需迁移。直接调用底层 runtime API 的自定义代码需先挂载 `AlphaSolveSessionStateService`；正常插件入口会自动处理。
 
-从 alpha.2 或更早版本升级时，还需遵循[先前的 Harness 升级指南](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2)，检查以下设置：
+从 `0.2.1-alpha.2` 或更早版本升级时，还需遵循[先前的 Harness 升级指南](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2)，检查以下设置：
 
 - Headless 依次读取启动进程的环境变量、工作区 `.env` 和 `$DSH_HOME/.env`；默认不再使用已保存的 API Key 或登录状态。请通过这些来源之一提供所需密钥。Web 和 Desktop 优先使用已保存的密钥，再读取同名环境变量。
 - Azure 的 `llm-pi-ai` 提供方配置键从 `config.providers.azure-openai-responses` 改为 `config.providers.azure`，显式 provider 选择也改为 `azure`。Responses API 标识 `azure-openai-responses` 和 `AZURE_OPENAI_*` 环境变量名称保持不变。
@@ -171,7 +171,7 @@ curator 工具使用工作区相对的 `knowledge/...` 路径，list/grep 还允
 
 ## 开发与验证
 
-将此仓库与 `master` 提交为 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` 的 `deepseek-harness` 仓库放在同一父目录中；该提交比 tag `dsh-v0.2.1-rc.3` 晚 1533 个提交。使用 Node.js 24.9 或更新版本。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，准备当前 Host、Client 和 Web 产物并运行整体类型检查。若分开执行这些步骤，应先运行 `pnpm run build:artifacts`，再运行 `pnpm run build:check`；后者不会重建缺失或过期产物。然后在 AlphaSolve 仓库执行：
+将此仓库与 `master` 提交为 `f3803c96974ad4a94195fb97e5c637e9c2a3afe3` 的 `deepseek-harness` 仓库放在同一父目录中；该提交与 tag `dsh-v0.2.2-alpha.2` 一致。使用 Node.js 24.9 或更新版本。开发依赖链接到 Harness 工作区包，`vitest.config.ts` 直接用 Harness 源码运行测试，并复用其标准装饰器转换。在编译 AlphaSolve 或运行打包安装验证之前，先在 Harness 仓库执行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，准备当前 Host、Client 和 Web 产物并运行整体类型检查。若分开执行这些步骤，应先运行 `pnpm run build:artifacts`，再运行 `pnpm run build:check`；后者不会重建缺失或过期产物。然后在 AlphaSolve 仓库执行：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -185,7 +185,7 @@ pnpm run test:packed
 
 打包安装验证会在隔离的临时使用方目录中，通过真实 Cordis Loader 和当前 Harness 服务加载 tarball，不会发送模型请求。数学求解质量和桌面 UI 的完整流程需要使用已配置的模型提供方另行验证。
 
-在 Windows 上，桌面加载验证需要使用同一 Harness 源码提交构建的 Desktop；rc.3 发布二进制不提供这些 API。验证不会修改其配置：
+在 Windows 上，桌面加载验证需要使用同一 Harness 源码提交构建的 Desktop；此处尚未测试 `0.2.2-alpha.2` 已发布的 Desktop。验证不会修改其配置：
 
 ```sh
 pnpm run test:desktop-load "C:/path/to/DeepSeek Harness"

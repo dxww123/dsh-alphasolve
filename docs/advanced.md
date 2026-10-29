@@ -22,15 +22,15 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets the DSH `0.2.1-rc.3` source commit listed in [Compatibility](../COMPATIBILITY.md), beyond the rc.3 release tag; its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.2-alpha.2` at the release-tag commit listed in [Compatibility](../COMPATIBILITY.md); its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
-## Migrating source installations to current DSH 0.2.1-rc.3 source
+## Migrating source installations to DSH 0.2.2-alpha.2
 
-Use Node.js 24.9 or newer and build Harness at `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.1-rc.3`, with Cordis `4.0.5`. The release tag predates required API changes, so installing rc.3 binaries alone is insufficient. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
+Use Node.js 24.9 or newer and build Harness at `f3803c96974ad4a94195fb97e5c637e9c2a3afe3` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.2-alpha.2`, with Cordis `4.0.6-alpha.1`. This source commit matches tag `dsh-v0.2.2-alpha.2`; installed Desktop and distributed binaries have not been tested here. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
 
 Choose native tool execution before activating or restoring AlphaSolve. The current Harness API cannot restore an inherited executor after a temporary override. PTC therefore returns `agent_executor_requires_native` without changing workspace state; the original PTC executor stays usable after preflight ends. Projection registration is awaited and its version-1 state needs no migration. Custom code calling the low-level runtime API must first mount `AlphaSolveSessionStateService`; the normal plugin handles this automatically.
 
-When upgrading from alpha.2 or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
+When upgrading from `0.2.1-alpha.2` or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
 
 - Headless uses the launch environment, the workspace `.env`, then `$DSH_HOME/.env`; saved API keys and sign-ins no longer authenticate it by default. Supply the required key through one of those sources. Web and Desktop prioritize a saved key over an environment variable with the same name.
 - For Azure, rename the `llm-pi-ai` provider key `config.providers.azure-openai-responses` to `config.providers.azure` and update explicit provider selections to `azure`. The Responses API identifier `azure-openai-responses` and `AZURE_OPENAI_*` environment variable names remain unchanged.
@@ -191,8 +191,8 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at commit
-`22ddee3792402c3e70ec5f86a63c3e3e895a2f60` on `master`, 1533 commits after
-tag `dsh-v0.2.1-rc.3`. Use Node.js 24.9 or newer. Development
+`f3803c96974ad4a94195fb97e5c637e9c2a3afe3` on `master`, matching
+tag `dsh-v0.2.2-alpha.2`. Use Node.js 24.9 or newer. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and
@@ -221,7 +221,7 @@ make a model request. Model-backed mathematical quality and a desktop UI run
 require separate verification with the configured model provider.
 
 On Windows, the Desktop load probe requires a Desktop built from the same
-Harness source commit. The rc.3 release binary does not provide these APIs.
+Harness source commit. The released `0.2.2-alpha.2` Desktop has not been tested here.
 The probe leaves its profile unchanged:
 
 ```sh

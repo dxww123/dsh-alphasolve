@@ -1,8 +1,8 @@
 # Compatibility
 
-The current source checkout targets DSH `0.2.1-rc.3`, source commit
-`22ddee3792402c3e70ec5f86a63c3e3e895a2f60` on `master`, 1533 commits after
-tag `dsh-v0.2.1-rc.3` (`1f81c047fc48fa190a683e469daa699857e9afe8`),
+The current source checkout targets DSH `0.2.2-alpha.2`, source commit
+`f3803c96974ad4a94195fb97e5c637e9c2a3afe3` on `master`, matching
+tag `dsh-v0.2.2-alpha.2`,
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
@@ -11,13 +11,12 @@ The published npm package `dsh-alphasolve@0.4.0` targets DSH `0.2.0-rc.2`.
 The updated peer requirements in this checkout have not been published to npm;
 for this DSH source snapshot, build both checkouts and install AlphaSolve locally using the
 [development instructions](docs/advanced.md#development-and-validation).
-The rc.3 tag predates the projection and executor API changes used here;
-the same version string does not make the released rc.3 binaries equivalent
-to this source commit.
+The current Harness source matches the release tag; installed Desktop and
+distributed binaries for this version have not been tested here.
 
-Windows validation on 2026-10-24 passed against the source commit above:
+Windows validation on 2026-10-29 passed against the source commit above:
 both frozen-lockfile installs; all 10 Harness build and aggregate checks with
-its 364-file artifact digest verified; AlphaSolve Host/Client typechecking and
+its 370-file artifact digest verified; AlphaSolve Host/Client typechecking and
 build; all 31 test files (294 passed, 4 existing platform skips); client-bundle
 isolation; and packed installation through the real Cordis Loader with current
 peers, package-owned dependencies, and confined Python/SymPy execution.
@@ -45,7 +44,7 @@ macOS/Linux execution were not tested in this validation.
 - DSH surfaces: the one-shot `headless` profile, long-lived `web` profile,
   Desktop, and custom profiles into which this package is explicitly installed.
   The previous installed-Desktop probe covered `0.2.0-rc.2`; Desktop
-  rc.3 has not been validated here.
+  `0.2.2-alpha.2` has not been validated here.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
 - DSH Agent presets: `standard` and `cordis` with native tool execution are
@@ -85,7 +84,7 @@ not being the final answer. DSH-specific session isolation, durable wait
 delivery, problem digests, two-phase promotion, and atomic winner publication
 are retained as safety extensions.
 
-This checkout pins DSH peers to `0.2.1-rc.3` and Cordis to `4.0.5`,
+This checkout pins DSH peers to `0.2.2-alpha.2` and Cordis to `4.0.6-alpha.1`,
 and does not contain older API adapters. Session restoration runs in the
 awaited `agent/created` hook.
 Harness checks `engines.dsh` when present and otherwise checks DSH

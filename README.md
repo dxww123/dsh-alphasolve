@@ -6,7 +6,7 @@ AlphaSolve helps you work on difficult mathematics problems in [DeepSeek Harness
 
 ## Install
 
-These npm instructions apply to published `dsh-alphasolve@0.4.0` and DSH `0.2.0-rc.2`. The current source checkout targets the DSH `0.2.1-rc.3` source commit recorded in [Compatibility](COMPATIBILITY.md), which is newer than the rc.3 release; those changes are not yet published to npm. Use Node.js 24.9 or newer, a native tool executor, and [build both checkouts from source](docs/advanced.md#development-and-validation).
+These npm instructions apply to published `dsh-alphasolve@0.4.0` and DSH `0.2.0-rc.2`. The current source checkout targets DSH `0.2.2-alpha.2` at the release-tag commit recorded in [Compatibility](COMPATIBILITY.md); those changes are not yet published to npm. Use Node.js 24.9 or newer, a native tool executor, and [build both checkouts from source](docs/advanced.md#development-and-validation).
 
 1. Install **DeepSeek Harness Desktop 0.2.0-rc.2** and configure a working model connection.
 2. Open the plugin manager, choose **Add plugin**, enter **`dsh-alphasolve`**, and install. Choose **Enable now** and restart if prompted.
