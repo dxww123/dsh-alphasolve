@@ -1,7 +1,7 @@
 # Compatibility
 
 The current source checkout targets DSH `0.2.2-alpha.2`, source commit
-`f3803c96974ad4a94195fb97e5c637e9c2a3afe3` on `master`, matching
+`ce7073d51254c26cd63b22a60835b8f948deb447` on `master`, 351 commits after
 tag `dsh-v0.2.2-alpha.2`,
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
@@ -11,12 +11,12 @@ The published npm package `dsh-alphasolve@0.4.0` targets DSH `0.2.0-rc.2`.
 The updated peer requirements in this checkout have not been published to npm;
 for this DSH source snapshot, build both checkouts and install AlphaSolve locally using the
 [development instructions](docs/advanced.md#development-and-validation).
-The current Harness source matches the release tag; installed Desktop and
-distributed binaries for this version have not been tested here.
+The checked Harness source is newer than the release tag while retaining its
+package versions; installed Desktop and distributed binaries have not been tested here.
 
-Windows validation on 2026-10-29 passed against the source commit above:
+Windows validation on 2026-10-31 passed against the source commit above:
 both frozen-lockfile installs; all 10 Harness build and aggregate checks with
-its 370-file artifact digest verified; AlphaSolve Host/Client typechecking and
+its 374-file artifact digest verified; AlphaSolve Host/Client typechecking and
 build; all 31 test files (294 passed, 4 existing platform skips); client-bundle
 isolation; and packed installation through the real Cordis Loader with current
 peers, package-owned dependencies, and confined Python/SymPy execution.
@@ -89,7 +89,11 @@ and does not contain older API adapters. Session restoration runs in the
 awaited `agent/created` hook.
 Harness checks `engines.dsh` when present and otherwise checks DSH
 peers. AlphaSolve leaves `engines.dsh` undeclared and uses the peer rule.
-AlphaSolve owns an asynchronously registered projection handle through
+Cordis rc.11 may complete a lifecycle wait with an already-disposed fiber when
+activation is interrupted. The projection-ownership regression verifies that
+disposal waits for registration cleanup, the reader remains unavailable, and
+a replacement can register the same projection. Actual registration failures
+still reject. AlphaSolve owns an asynchronously registered projection handle through
 `AlphaSolveSessionStateService`; its activation and wait-acknowledgement state
 remains version 1. Custom programmatic compositions using the low-level runtime
 entry points mount that service before reading state. The controller mounts it

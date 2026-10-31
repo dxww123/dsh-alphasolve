@@ -152,13 +152,23 @@ describe('AlphaSolve projection ownership', () => {
     const { ctx, session } = await harness(false)
     const barrier = holdRegistration()
     const owner = ctx.plugin(AlphaSolveSessionStateService)
-    const rejected = expect(Promise.resolve(owner)).rejects.toThrow()
+    const initialized = Promise.resolve(owner).then(fiber => fiber.uid)
     await barrier.entered
-    const disposed = owner.dispose()
-    barrier.release()
+    let disposalFinished = false
+    const disposed = owner.dispose().then(() => { disposalFinished = true })
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(disposalFinished).toBe(false)
+      expect(ctx.get('alphaSolveSessions')).toBeUndefined()
+    } finally {
+      barrier.release()
+    }
     await disposed
-    await rejected
+    expect(await initialized).toBeNull()
     expect(ctx.get('alphaSolveSessions')).toBeUndefined()
     expect(ctx.sessionProjections.checkpoint(session)).not.toHaveProperty('alphasolve')
+    await ctx.plugin(AlphaSolveSessionStateService)
+    expect(ctx.sessionProjections.checkpoint(session)).toHaveProperty('alphasolve')
+    expect(hasDurableAlphaSolveResumeIntent(ctx.alphaSolveSessions.stateOf(session))).toBe(false)
   })
 })

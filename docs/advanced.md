@@ -22,11 +22,11 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.2-alpha.2` at the release-tag commit listed in [Compatibility](../COMPATIBILITY.md); its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.2-alpha.2` at the source commit listed in [Compatibility](../COMPATIBILITY.md); its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
 ## Migrating source installations to DSH 0.2.2-alpha.2
 
-Use Node.js 24.9 or newer and build Harness at `f3803c96974ad4a94195fb97e5c637e9c2a3afe3` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.2-alpha.2`, with Cordis `4.0.6-alpha.1`. This source commit matches tag `dsh-v0.2.2-alpha.2`; installed Desktop and distributed binaries have not been tested here. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
+Use Node.js 24.9 or newer and build Harness at `ce7073d51254c26cd63b22a60835b8f948deb447` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.2-alpha.2`, with Cordis `4.0.6-alpha.1`. This source commit is 351 commits after tag `dsh-v0.2.2-alpha.2`; installed Desktop and distributed binaries have not been tested here. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
 
 Choose native tool execution before activating or restoring AlphaSolve. The current Harness API cannot restore an inherited executor after a temporary override. PTC therefore returns `agent_executor_requires_native` without changing workspace state; the original PTC executor stays usable after preflight ends. Projection registration is awaited and its version-1 state needs no migration. Custom code calling the low-level runtime API must first mount `AlphaSolveSessionStateService`; the normal plugin handles this automatically.
 
@@ -191,7 +191,7 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at commit
-`f3803c96974ad4a94195fb97e5c637e9c2a3afe3` on `master`, matching
+`ce7073d51254c26cd63b22a60835b8f948deb447` on `master`, 351 commits after
 tag `dsh-v0.2.2-alpha.2`. Use Node.js 24.9 or newer. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
