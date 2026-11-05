@@ -116,18 +116,21 @@ describe('AlphaSolve projection ownership', () => {
     expect(hasDurableAlphaSolveResumeIntent(ctx.alphaSolveSessions.stateOf(session))).toBe(true)
   })
 
-  it('releases checkpoint participation and reconstructs durable intent after owner replacement', async () => {
+  it('retains the last released checkpoint and reconstructs durable intent after owner replacement', async () => {
     const { ctx, session, owner } = await harness()
     const events: SessionEvent[] = []
     ctx.on('session/event', (current, event) => { if (current === session) events.push(event) })
     call(session, 'activate-before-dispose', 'alphasolve_activate')
     result(session, 'activate-before-dispose', { activated: true })
-    expect(ctx.sessionProjections.checkpoint(session)).toHaveProperty('alphasolve')
+    const checkpoint = ctx.sessionProjections.checkpoint(session).alphasolve
+    expect(checkpoint).toBeDefined()
     await owner!.dispose()
     expect(ctx.get('alphaSolveSessions')).toBeUndefined()
-    expect(ctx.sessionProjections.checkpoint(session)).not.toHaveProperty('alphasolve')
+    expect(ctx.sessionProjections.checkpoint(session).alphasolve).toEqual(checkpoint)
+    expect(ctx.sessionProjections.checkpoint(ctx.sessions.create(SessionId('created-while-unloaded')))).not.toHaveProperty('alphasolve')
     call(session, 'wait-while-unloaded', 'alphasolve_wait')
     result(session, 'wait-while-unloaded', { completed: [] })
+    expect(ctx.sessionProjections.checkpoint(session).alphasolve).toEqual(checkpoint)
     await ctx.plugin(AlphaSolveSessionStateService)
     const restored = ctx.sessions.create(SessionId('replaced-owner-restore'), { seed: events })
     const state = ctx.alphaSolveSessions.stateOf(restored)

@@ -22,13 +22,15 @@ Check installation with `dsh plugin --profile web list --depth 0` and the compos
 
 Desktop has its own profile. Use its GUI plugin manager, or quit Desktop and use its bundled command with `dsh plugin --profile desktop add dsh-alphasolve`; an npm-installed DSH CLI cannot manage that profile.
 
-The current source checkout targets DSH `0.2.2-alpha.2` at the source commit listed in [Compatibility](../COMPATIBILITY.md); its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
+The current source checkout targets DSH `0.2.2-rc.1` at the source commit listed in [Compatibility](../COMPATIBILITY.md); its updated peer requirements are not yet published to npm. Follow [Development and validation](#development-and-validation), then run the commands above from the built checkout with the package name replaced by `.`. GitHub sources also work through the plugin manager, but require Git and can depend on GitHub transport/authentication setup; the npm package avoids that prerequisite.
 
-## Migrating source installations to DSH 0.2.2-alpha.2
+## Migrating source installations to DSH 0.2.2-rc.1
 
-Use Node.js 24.9 or newer and build Harness at `ce7073d51254c26cd63b22a60835b8f948deb447` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.2-alpha.2`, with Cordis `4.0.6-alpha.1`. This source commit is 351 commits after tag `dsh-v0.2.2-alpha.2`; installed Desktop and distributed binaries have not been tested here. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
+Use Node.js 24.9 or newer and build Harness at `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159` before rebuilding and reinstalling AlphaSolve. The exact DSH peers are `0.2.2-rc.1`, with Cordis `4.1.0`. This source commit is 811 commits after tag `dsh-v0.2.2-rc.1`; installed Desktop and distributed binaries have not been tested here. Harness checks `engines.dsh` when declared and otherwise checks DSH peers; AlphaSolve uses the peer rule without an exemption.
 
 Choose native tool execution before activating or restoring AlphaSolve. The current Harness API cannot restore an inherited executor after a temporary override. PTC therefore returns `agent_executor_requires_native` without changing workspace state; the original PTC executor stays usable after preflight ends. Projection registration is awaited and its version-1 state needs no migration. Custom code calling the low-level runtime API must first mount `AlphaSolveSessionStateService`; the normal plugin handles this automatically.
+
+The updated role runner removes the retired `parentAgent` creation/resume option. Durable parent Session links and AlphaSolve-owned cleanup remain in place. A released projection now retains its last checkpoint for existing Sessions; replacing its owner reconstructs events committed while it was absent. Existing AlphaSolve state and one-shot role transcripts need no data rewrite.
 
 When upgrading from `0.2.1-alpha.2` or earlier, the [earlier Harness upgrade guides](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-rc.2/docs/upgrade-guide/v0.2.1-alpha.2) also apply. Check these settings:
 
@@ -191,8 +193,8 @@ Curator tools use workspace-relative `knowledge/...` paths. Curator list/grep al
 ## Development and validation
 
 Keep this checkout next to a `deepseek-harness` checkout at commit
-`ce7073d51254c26cd63b22a60835b8f948deb447` on `master`, 351 commits after
-tag `dsh-v0.2.2-alpha.2`. Use Node.js 24.9 or newer. Development
+`fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159` on `master`, 811 commits after
+tag `dsh-v0.2.2-rc.1`. Use Node.js 24.9 or newer. Development
 dependencies link to its workspace packages; `vitest.config.ts` resolves tests
 directly to the Harness source and uses its standard decorator transform.
 In the Harness checkout, run `pnpm install --frozen-lockfile` and
@@ -201,7 +203,7 @@ probe. This prepares the current Host, Client, and Web artifacts and runs the
 aggregate type checks. When running those steps separately, use
 `pnpm run build:artifacts` before `pnpm run build:check`; the latter does not
 rebuild missing or stale artifacts. Then run these commands in the AlphaSolve
-checkout:
+checkout. On Windows, run these commands from the physical repository path if the checkout is reached through a directory junction; Vitest's browser environment can otherwise fail to resolve test modules:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -221,7 +223,7 @@ make a model request. Model-backed mathematical quality and a desktop UI run
 require separate verification with the configured model provider.
 
 On Windows, the Desktop load probe requires a Desktop built from the same
-Harness source commit. The released `0.2.2-alpha.2` Desktop has not been tested here.
+Harness source commit. The released `0.2.2-rc.1` Desktop has not been tested here.
 The probe leaves its profile unchanged:
 
 ```sh

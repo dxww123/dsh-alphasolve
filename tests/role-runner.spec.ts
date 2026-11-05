@@ -179,7 +179,7 @@ describe('role Agent technical timeouts', () => {
 
     await expect(runRoleAgent(options(parent))).rejects.toBe(factoryError)
     expect(create).toHaveBeenLastCalledWith(expect.objectContaining({
-      parentAgent: parent,
+      meta: expect.objectContaining({ parentSession: parent.id, origin: 'subagent' }),
       agentOptions: { ...logged, maxTokens: 500 },
     }))
 
@@ -277,7 +277,9 @@ describe('role Agent technical timeouts', () => {
       await expect(run).resolves.toMatchObject({ text: 'still active', stopReason: 'completed', steps: 1 })
       expect(child.cancel).not.toHaveBeenCalled()
       expect(dispose).toHaveBeenCalledOnce()
-      expect(create).toHaveBeenCalledWith(expect.objectContaining({ parentAgent: parent }))
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        meta: expect.objectContaining({ parentSession: parent.id, origin: 'subagent' }),
+      }))
       expect(childCtx.systemPrompt.section).toHaveBeenCalledWith({
         name: 'deployment:persona-prefix', order: 0, text: 'Bounded reasoning role.',
       })

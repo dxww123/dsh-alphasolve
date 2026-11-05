@@ -1,8 +1,8 @@
 # Compatibility
 
-The current source checkout targets DSH `0.2.2-alpha.2`, source commit
-`ce7073d51254c26cd63b22a60835b8f948deb447` on `master`, 351 commits after
-tag `dsh-v0.2.2-alpha.2`,
+The current source checkout targets DSH `0.2.2-rc.1`, source commit
+`fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159` on `master`, 811 commits after
+tag `dsh-v0.2.2-rc.1`,
 and AlphaSolve `main` commit
 `a336b85001d8c8cd7ea3147f7e224d5acb8c7534` recorded in
 `THIRD_PARTY_NOTICES.md`.
@@ -14,9 +14,9 @@ for this DSH source snapshot, build both checkouts and install AlphaSolve locall
 The checked Harness source is newer than the release tag while retaining its
 package versions; installed Desktop and distributed binaries have not been tested here.
 
-Windows validation on 2026-10-31 passed against the source commit above:
+Windows validation on 2026-11-05 passed against the source commit above:
 both frozen-lockfile installs; all 10 Harness build and aggregate checks with
-its 374-file artifact digest verified; AlphaSolve Host/Client typechecking and
+its 377-file artifact digest verified; AlphaSolve Host/Client typechecking and
 build; all 31 test files (294 passed, 4 existing platform skips); client-bundle
 isolation; and packed installation through the real Cordis Loader with current
 peers, package-owned dependencies, and confined Python/SymPy execution.
@@ -44,7 +44,7 @@ macOS/Linux execution were not tested in this validation.
 - DSH surfaces: the one-shot `headless` profile, long-lived `web` profile,
   Desktop, and custom profiles into which this package is explicitly installed.
   The previous installed-Desktop probe covered `0.2.0-rc.2`; Desktop
-  `0.2.2-alpha.2` has not been validated here.
+  `0.2.2-rc.1` has not been validated here.
 - DSH installation: standard profile bundle metadata and
   `dsh plugin --profile <name> add ...`; no DSH source patch is required.
 - DSH Agent presets: `standard` and `cordis` with native tool execution are
@@ -84,20 +84,27 @@ not being the final answer. DSH-specific session isolation, durable wait
 delivery, problem digests, two-phase promotion, and atomic winner publication
 are retained as safety extensions.
 
-This checkout pins DSH peers to `0.2.2-alpha.2` and Cordis to `4.0.6-alpha.1`,
+This checkout pins DSH peers to `0.2.2-rc.1` and Cordis to `4.1.0`,
 and does not contain older API adapters. Session restoration runs in the
 awaited `agent/created` hook.
 Harness checks `engines.dsh` when present and otherwise checks DSH
 peers. AlphaSolve leaves `engines.dsh` undeclared and uses the peer rule.
-Cordis rc.11 may complete a lifecycle wait with an already-disposed fiber when
-activation is interrupted. The projection-ownership regression verifies that
-disposal waits for registration cleanup, the reader remains unavailable, and
-a replacement can register the same projection. Actual registration failures
-still reject. AlphaSolve owns an asynchronously registered projection handle through
+Cordis may complete a lifecycle wait with an already-disposed fiber when
+activation is interrupted. Disposal waits for registration cleanup, withdraws
+the reader, and permits a replacement to register the same projection; actual
+registration failures still reject. Released projections retain the last
+checkpoint for existing Sessions without folding later events. Sessions
+created while the owner is absent have no row, and replacement registration
+refolds events committed during that absence. AlphaSolve owns an asynchronously registered projection handle through
 `AlphaSolveSessionStateService`; its activation and wait-acknowledgement state
 remains version 1. Custom programmatic compositions using the low-level runtime
 entry points mount that service before reading state. The controller mounts it
 automatically and waits for registration before accepting events.
+Agent creation and resume no longer take a runtime-owner parameter.
+AlphaSolve owns each role handle through its caller Cordis context and explicit
+teardown, while durable creator lineage remains in `meta.parentSession` and
+`origin: 'subagent'`. Its one-shot descriptors and version-0 catalog entries
+remain supported; they do not join the managed subagent continuation tree.
 Role Agents mount the native executor for their lifetime. Parent Sessions retain
 their existing executor because the latest Harness API has no reversible
 presentation override. Ordinary forks, including parentless seeded Sessions,

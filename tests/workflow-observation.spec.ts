@@ -151,6 +151,8 @@ describe('durable workflow overview', () => {
     for (const row of view.runs) {
       const log = logs.get(row.sessionId)
       if (log === undefined) throw new Error('missing durable child log')
+      expect(log.header).toMatchObject({ parentSession: row.parentSessionId, origin: 'subagent' })
+      expect(ctx.agents.get(SessionId(row.sessionId))).toBeUndefined()
       const restored = validateStoredEvents(log.header, structuredClone(log.events))
       expect(foldSubagentDescriptor(restored)).toMatchObject({ mode: 'one-shot', provider: 'alphasolve' })
       expect(restored.findIndex(event => event.type === 'subagent/descriptor'))
@@ -170,7 +172,7 @@ describe('durable workflow overview', () => {
     const root = await workspace()
     const observer = await AlphaSolveWorkflowObserver.open(root, 'main', vi.fn())
     const { ctx, parent } = await harness(root, new CompletingAdapter())
-    const child = await ctx.agents.create({ parentAgent: parent,
+    const child = await ctx.agents.create({
       sessionId: SessionId('crash-left-role'), meta: { cwd: root, parentSession: parent.id, origin: 'subagent' },
     })
     await observer.role({ workerId: 'worker-a', role: 'generator' }).started(child.agent)

@@ -386,7 +386,6 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
 
   const creationOptions = {
     sessionId: childId,
-    parentAgent: options.parent,
     meta: {
       cwd: path.resolve(options.cwd),
       parentSession: options.parent.id,
@@ -464,7 +463,7 @@ export async function runRoleAgent(options: RunRoleAgentOptions): Promise<RoleRu
     },
   } satisfies CreateAgentOptions
   const creation = options.session?.resume
-    ? options.parent.ctx.agents.resume({ resumeSessionId: childId, parentAgent: options.parent,
+    ? options.parent.ctx.agents.resume({ resumeSessionId: childId,
         agentOptions: creationOptions.agentOptions, signal: creationSignal, setup: creationOptions.setup })
     : options.parent.ctx.agents.create(creationOptions)
   try {
